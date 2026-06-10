@@ -40,6 +40,11 @@ async function importFresh(specifier) {
   return import(`${specifier}?v=${Date.now()}-${Math.random()}`);
 }
 
+async function importApiFresh() {
+  const { handleApi } = await importFresh("../src/routes/api.js");
+  return handleApi;
+}
+
 test("loads local env file values without insecure defaults", async () => {
   await withTempEnv({}, async (tempDir) => {
     await writeFile(
@@ -107,6 +112,137 @@ test("configured credentials still allow login through the auth flow", async () 
       assert.equal(res.json.ok, true);
       assert.equal(res.json.admin.username, "env-admin");
       assert.equal(typeof res.json.session, "string");
+    }
+  );
+});
+
+test("oversized JSON request returns 413", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const payload = JSON.stringify({ username: "env-admin", password: "env-pass", pad: "x".repeat(1024 * 1024) });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        rawBody: payload
+      });
+      assert.equal(res.statusCode, 413);
+      assert.equal(res.json.error, "Request body too large");
+    }
+  );
+});
+
+test("invalid JSON returns 400", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        rawBody: "{not json"
+      });
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.json.error, "Invalid JSON body");
+    }
+  );
+});
+
+test("missing required login fields return 400", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin" }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Missing required field: password/);
+    }
+  );
+});
+
+test("missing required panel fields return 400", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Panel One", type: "marzban" }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Missing required field: url/);
+    }
+  );
+});
+
+test("existing valid admin user flow still passes", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "user-one",
+          panelId: panel.id
+        }
+      });
+      assert.equal(user.username, "user-one");
+      assert.equal(user.panelId, panel.id);
     }
   );
 });
@@ -225,8 +361,21 @@ async function callApi(handleApi, { method, pathname, session, body }) {
   return res.json.data ?? res.json;
 }
 
-function createMockRequest(method, pathname, session, body) {
-  const payload = body ? JSON.stringify(body) : "";
+async function callApiWithOutcome(handleApi, { method, pathname, session, body, rawBody }) {
+  const req = createMockRequest(method, pathname, session, body, rawBody);
+  const res = createMockResponse();
+  const route = { method, pathname, search: new URLSearchParams() };
+  try {
+    await handleApi(req, res, route);
+  } catch (error) {
+    res.writeHead(error.status || 500, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: false, error: error.message || "Internal server error" }));
+  }
+  return res;
+}
+
+function createMockRequest(method, pathname, session, body, rawBody) {
+  const payload = rawBody ?? (body ? JSON.stringify(body) : "");
   return {
     method,
     url: pathname,

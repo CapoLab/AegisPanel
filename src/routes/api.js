@@ -17,6 +17,16 @@ function publicPanel(panel) {
   return safe;
 }
 
+function requiredString(body, key) {
+  const value = body?.[key];
+  if (typeof value !== "string" || !value.trim()) {
+    const error = new Error(`Missing required field: ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  return value.trim();
+}
+
 function requireAuth(req, role) {
   const session = req.headers["x-aegis-session"] || "";
   const payload = verifySession(session, config.sessionSecret);
@@ -106,8 +116,10 @@ export async function handleApi(req, res, route) {
 
   if (method === "POST" && pathname === "/api/auth/login") {
     const body = await readJson(req);
-    const admin = store.list("admins").find((item) => item.username === body.username);
-    if (!admin || !admin.active || !verifyPassword(body.password, admin.passwordHash)) {
+    const username = requiredString(body, "username");
+    const password = requiredString(body, "password");
+    const admin = store.list("admins").find((item) => item.username === username);
+    if (!admin || !admin.active || !verifyPassword(password, admin.passwordHash)) {
       return sendJson(res, 401, { ok: false, error: "Invalid credentials" });
     }
     const session = signSession({ sub: admin.id, username: admin.username, role: admin.role }, config.sessionSecret);
@@ -129,12 +141,14 @@ export async function handleApi(req, res, route) {
   if (method === "POST" && pathname === "/api/superadmin/admins") {
     const superadmin = requireAuth(req, "superadmin");
     const body = await readJson(req);
-    if (store.list("admins").some((admin) => admin.username === body.username)) {
+    const username = requiredString(body, "username");
+    const password = requiredString(body, "password");
+    if (store.list("admins").some((admin) => admin.username === username)) {
       return sendJson(res, 409, { ok: false, error: "Username already exists" });
     }
     const admin = store.insert("admins", {
-      username: body.username,
-      passwordHash: hashPassword(body.password),
+      username,
+      passwordHash: hashPassword(password),
       role: body.role || "admin",
       active: body.active !== false,
       panelId: body.panelId || null,
@@ -177,11 +191,14 @@ export async function handleApi(req, res, route) {
   if (method === "POST" && pathname === "/api/superadmin/panels") {
     const superadmin = requireAuth(req, "superadmin");
     const body = await readJson(req);
-    if (!adapterFor(body.type)) return sendJson(res, 400, { ok: false, error: "Unsupported panel type" });
+    const name = requiredString(body, "name");
+    const type = requiredString(body, "type");
+    const url = requiredString(body, "url");
+    if (!adapterFor(type)) return sendJson(res, 400, { ok: false, error: "Unsupported panel type" });
     const panel = store.insert("panels", {
-      name: body.name,
-      type: body.type,
-      url: body.url,
+      name,
+      type,
+      url,
       subscriptionUrl: body.subscriptionUrl || "",
       username: body.username || "",
       secret: body.secret || "",
@@ -236,13 +253,15 @@ export async function handleApi(req, res, route) {
 
   if (method === "POST" && pathname === "/api/admin/users") {
     const body = await readJson(req);
-    const panelIdValue = actor.role === "superadmin" ? body.panelId : actor.panelId;
+    const username = requiredString(body, "username");
+    const panelIdRaw = requiredString(body, "panelId");
+    const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
     const user = store.insert("users", {
       ownerAdminId: actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id,
       panelId: panel.id,
-      username: body.username,
+      username,
       uuid: body.uuid || null,
       subscriptionId: body.subscriptionId || null,
       inboundId: body.inboundId || "default",
