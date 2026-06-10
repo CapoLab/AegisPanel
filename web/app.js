@@ -304,7 +304,7 @@ function dashboard() {
                   <tr>
                     <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
                     <td>${esc(panelName(u.panelId))}</td>
-                    <td>${esc(u.inboundId || "default")}</td>
+                    <td>${esc(displayInboundId(u) || "default")}</td>
                     <td>${bytes(u.usedBytes)}</td>
                     <td>${bytes(u.limitBytes)}</td>
                     <td>${dateShort(u.expiresAt)}</td>
@@ -437,7 +437,7 @@ function users() {
               <tr>
                 <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
                 <td>${esc(panelName(u.panelId))}</td>
-                <td>${esc(u.inboundId || "default")}</td>
+                <td>${esc(displayInboundId(u) || "default")}</td>
                 <td>${bytes(u.usedBytes)}</td>
                 <td>${bytes(u.limitBytes)}</td>
                 <td>${dateShort(u.expiresAt)}</td>
@@ -699,8 +699,14 @@ function formatInboundDetails(inbound) {
   return [inbound.protocol, inbound.network, inbound.tls, inbound.port].filter((part) => part !== "" && part !== null && part !== undefined).join("/");
 }
 
+function normalizeInboundSearchText(value) {
+  if (value == null) return "";
+  const normalized = String(value);
+  return (typeof normalized.normalize === "function" ? normalized.normalize("NFKC") : normalized).toLowerCase();
+}
+
 function isDummyOrMetricsInbound(inbound) {
-  return /dummy|metrics/i.test(`${inbound?.label || ""} ${inbound?.id || ""}`);
+  return /dummy|metrics/i.test(normalizeInboundSearchText(`${inbound?.label || ""} ${inbound?.id || ""}`));
 }
 
 function groupMarzbanInbounds(inbounds) {
@@ -728,6 +734,11 @@ function normalMarzbanInboundIds(inbounds) {
 function preferredMarzbanInboundId(inboundIds, fallbackId = "") {
   const real = inboundIds.find((id) => !isDummyOrMetricsInbound({ id }));
   return real || inboundIds[0] || fallbackId || "default";
+}
+
+function displayInboundId(user) {
+  const inboundIds = Array.isArray(user?.inboundIds) && user.inboundIds.length ? user.inboundIds : [user?.inboundId].filter(Boolean);
+  return preferredMarzbanInboundId(inboundIds, user?.inboundId);
 }
 
 function createUserExpiryField() {

@@ -24,6 +24,22 @@ function publicPanel(panel) {
   return safe;
 }
 
+function normalizeInboundSearchText(value) {
+  if (value == null) return "";
+  const normalized = String(value);
+  return (typeof normalized.normalize === "function" ? normalized.normalize("NFKC") : normalized).toLowerCase();
+}
+
+function publicUser(user) {
+  const safe = { ...user };
+  if (Array.isArray(safe.inboundIds) && safe.inboundIds.length > 0) {
+    safe.inboundId = preferredInboundId(safe.inboundIds, safe.inboundId);
+  } else if (safe.inboundId) {
+    safe.inboundId = preferredInboundId([safe.inboundId], safe.inboundId);
+  }
+  return safe;
+}
+
 function requiredString(body, key) {
   const value = body?.[key];
   if (typeof value !== "string" || !value.trim()) {
@@ -135,7 +151,7 @@ function parseNonNegativeFiniteBytes(value, key, { allowMissing = false, default
 }
 
 function isDummyOrMetricsInboundId(value) {
-  return /dummy|metrics/i.test(String(value || ""));
+  return /dummy|metrics/i.test(normalizeInboundSearchText(value));
 }
 
 function preferredInboundId(inboundIds, fallbackInboundId = "") {
@@ -397,7 +413,7 @@ export async function handleApi(req, res, route) {
   }
 
   if (method === "GET" && pathname === "/api/admin/users") {
-    return sendJson(res, 200, { ok: true, data: scopedUsers(actor) });
+    return sendJson(res, 200, { ok: true, data: scopedUsers(actor).map(publicUser) });
   }
 
   if (method === "POST" && pathname === "/api/admin/users") {
@@ -482,7 +498,7 @@ export async function handleApi(req, res, route) {
       }
     }
     store.audit(actor, "user.create", user.id, { username: user.username });
-    return sendJson(res, 201, { ok: true, data: user });
+    return sendJson(res, 201, { ok: true, data: publicUser(user) });
   }
 
   const userId = match(pathname, "/api/admin/users/:id");
@@ -498,7 +514,7 @@ export async function handleApi(req, res, route) {
     }
     const updated = store.update("users", user.id, body);
     store.audit(actor, "user.update", user.id);
-    return sendJson(res, 200, { ok: true, data: updated });
+    return sendJson(res, 200, { ok: true, data: publicUser(updated) });
   }
 
   const userTrafficSyncId = match(pathname, "/api/admin/users/:id/sync-traffic");
@@ -519,7 +535,7 @@ export async function handleApi(req, res, route) {
       const usedBytes = finiteQuotaBytes(result?.usedBytes);
       const updated = usedBytes !== null ? store.update("users", user.id, { usedBytes }) : user;
       store.audit(actor, "user.syncTraffic", user.id, { username: user.username, usedBytes: updated.usedBytes });
-      return sendJson(res, 200, { ok: true, data: updated });
+      return sendJson(res, 200, { ok: true, data: publicUser(updated) });
     } catch (error) {
       return sendJson(res, error.status || 502, {
         ok: false,

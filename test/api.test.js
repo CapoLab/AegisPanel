@@ -2407,6 +2407,93 @@ test("marzban createUser keeps metrics in inboundIds but prefers a real inbound 
   assert.equal(calls.length, 2);
 });
 
+test("marzban createUser prefers a real inbound even when styled metrics text is selected", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "styled-metrics-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ username: "styled-metrics-user" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "styled-metrics-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 100,
+              usedBytes: 0,
+              inboundIds: ["vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123", "vless:Falkenstein VLESS WS TLS:10002"],
+              inboundId: "vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123",
+              expiresAt: "2030-01-02T03:04:05.000Z"
+            }
+          });
+
+          assert.equal(created.username, "styled-metrics-user");
+          assert.equal(created.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+          assert.deepEqual(created.inboundIds, ["vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123", "vless:Falkenstein VLESS WS TLS:10002"]);
+        }
+      );
+      const users = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: login.session
+      });
+      const createdUser = users.find((user) => user.username === "styled-metrics-user");
+      assert.equal(createdUser.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+      assert.equal(calls.length, 2);
+    }
+  );
+});
+
 test("marzban createUser allows metrics-only inbound selection", async () => {
   const calls = [];
   await withTempEnv(
