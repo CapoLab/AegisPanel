@@ -17,6 +17,8 @@ const state = {
   createUserInboundsError: "",
   createUserInboundId: "",
   createUserInboundIds: [],
+  createUserExpiryMode: "no-expiry",
+  createUserCustomExpiresAt: "",
   error: "",
   notice: ""
 };
@@ -463,6 +465,8 @@ function showUserForm() {
   state.createUserInboundsError = "";
   state.createUserInboundId = "";
   state.createUserInboundIds = [];
+  state.createUserExpiryMode = "no-expiry";
+  state.createUserCustomExpiresAt = "";
   modal("New user", createUserModalBody());
   if (state.createUserPanelId) {
     void loadUserInbounds(state.createUserPanelId, { silent: true });
@@ -477,7 +481,7 @@ function createUserModalBody() {
       <div id="user-inbound-field">${createUserInboundField()}</div>
       <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
       <label>Traffic limit (GB)<input name="limitGb" type="number" min="0" step="1" value="25" /></label>
-      <label>Expiry<input name="expiresAt" type="datetime-local" /></label>
+      <div id="user-expiry-field">${createUserExpiryField()}</div>
       <button class="primary" type="submit">Create user</button>
     </form>
   `;
@@ -544,6 +548,15 @@ function refreshUserInboundField() {
   field.innerHTML = createUserInboundField();
 }
 
+function refreshUserExpiryField() {
+  const field = document.querySelector("#user-expiry-field");
+  if (!field) {
+    setModal("New user", createUserModalBody());
+    return;
+  }
+  field.innerHTML = createUserExpiryField();
+}
+
 function formatInboundOption(inbound) {
   const details = [inbound.protocol, inbound.network, inbound.tls, inbound.port].filter((part) => part !== "" && part !== null && part !== undefined).join("/");
   return `${inbound.label || inbound.id} — ${details || inbound.id}`;
@@ -576,6 +589,62 @@ function normalMarzbanInboundIds(inbounds) {
   return inbounds.filter((inbound) => !/dummy|metrics/i.test(`${inbound.label || ""} ${inbound.id || ""}`)).map((inbound) => inbound.id);
 }
 
+function createUserExpiryField() {
+  const mode = state.createUserExpiryMode || "no-expiry";
+  const customValue = state.createUserCustomExpiresAt || "";
+  const presetLabels = {
+    "no-expiry": "No expiry",
+    "1d": "1 day",
+    "3d": "3 days",
+    "7d": "7 days",
+    "30d": "30 days",
+    "90d": "90 days",
+    custom: "Custom date"
+  };
+  return `
+    <div class="expiry-picker">
+      <label>Expiry
+        <select name="expiryMode" onchange="window.Aegis.setCreateUserExpiryMode(this.value)">
+          ${Object.entries(presetLabels).map(([value, label]) => `<option value="${value}"${value === mode ? " selected" : ""}>${esc(label)}</option>`).join("")}
+        </select>
+      </label>
+      ${mode === "custom" ? `
+        <label>Custom date<input name="expiresAtCustom" type="datetime-local" value="${esc(customValue)}" onchange="window.Aegis.setCreateUserCustomExpiry(this.value)" /></label>
+      ` : ""}
+      <p class="muted expiry-preview">${esc(formatExpiryPreview())}</p>
+    </div>
+  `;
+}
+
+function formatExpiryPreview() {
+  const mode = state.createUserExpiryMode || "no-expiry";
+  const daysMap = {
+    "1d": 1,
+    "3d": 3,
+    "7d": 7,
+    "30d": 30,
+    "90d": 90
+  };
+  if (mode === "no-expiry") return "No expiry";
+  if (mode === "custom") {
+    if (!state.createUserCustomExpiresAt) return "Select a custom date";
+    return `Expires at ${formatLocalDateTime(state.createUserCustomExpiresAt)}`;
+  }
+  const days = daysMap[mode] || 0;
+  return `Expires in ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function formatLocalDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
 function toggleMarzbanInboundSelection(id, checked) {
   const selected = new Set(state.createUserInboundIds);
   if (checked) selected.add(id);
@@ -592,6 +661,19 @@ function selectAllMarzbanInbounds() {
 function clearMarzbanInbounds() {
   state.createUserInboundIds = [];
   refreshUserInboundField();
+}
+
+function setCreateUserExpiryMode(mode) {
+  state.createUserExpiryMode = mode;
+  if (mode !== "custom") {
+    state.createUserCustomExpiresAt = "";
+  }
+  refreshUserExpiryField();
+}
+
+function setCreateUserCustomExpiry(value) {
+  state.createUserCustomExpiresAt = value;
+  refreshUserExpiryField();
 }
 
 async function loadUserInbounds(panelId, { silent = false } = {}) {
@@ -691,12 +773,13 @@ async function createUser(event) {
         throw new Error(state.createUserInboundsError || "Select a Marzban inbound before creating the user.");
       }
       const inboundId = state.createUserInboundIds[0];
+      const expiresAt = resolveCreateUserExpiry(form);
       const body = {
         username: form.get("username"),
         panelId,
         flow: form.get("flow") || "",
         limitBytes: gbToBytes(form.get("limitGb")),
-        expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
+        expiresAt,
         inboundId,
         inboundIds: state.createUserInboundIds
       };
@@ -711,7 +794,7 @@ async function createUser(event) {
       panelId,
       flow: form.get("flow") || "",
       limitBytes: gbToBytes(form.get("limitGb")),
-      expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
+      expiresAt: resolveCreateUserExpiry(form),
       inboundId: form.get("inboundId") || "default"
     };
     await api("/api/admin/users", {
@@ -719,6 +802,32 @@ async function createUser(event) {
       body
     });
   }, "User created");
+}
+
+function resolveCreateUserExpiry(form) {
+  const mode = state.createUserExpiryMode || "no-expiry";
+  if (mode === "no-expiry") return null;
+  if (mode === "custom") {
+    const customValue = state.createUserCustomExpiresAt || form.get("expiresAtCustom");
+    if (!customValue) {
+      throw new Error("Please select a custom expiry date.");
+    }
+    const date = new Date(customValue);
+    if (Number.isNaN(date.getTime())) {
+      throw new Error("Please select a valid custom expiry date.");
+    }
+    return date.toISOString();
+  }
+  const daysMap = {
+    "1d": 1,
+    "3d": 3,
+    "7d": 7,
+    "30d": 30,
+    "90d": 90
+  };
+  const days = daysMap[mode];
+  if (!days) return null;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 async function createNews(event) {
@@ -849,6 +958,8 @@ window.Aegis = {
   toggleMarzbanInboundSelection,
   selectAllMarzbanInbounds,
   clearMarzbanInbounds,
+  setCreateUserExpiryMode,
+  setCreateUserCustomExpiry,
   createNews,
   syncPanel,
   syncUserTraffic,
