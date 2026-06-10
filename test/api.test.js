@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { readJson } from "../src/utils/http.js";
 import { hashPassword, verifyPassword, signSession, verifySession } from "../src/utils/security.js";
 import { supportedPanels, adapterFor } from "../src/adapters/registry.js";
-import { marzbanAdapter } from "../src/adapters/marzban.js";
+import { buildClient, marzbanAdapter } from "../src/adapters/marzban.js";
 
 async function withTempEnv(env, fn) {
   const keys = [
@@ -885,13 +885,133 @@ test("panel credentials are stripped from api responses", async () => {
 });
 
 test("marzban adapter methods are explicit not-implemented skeletons", async () => {
-  for (const method of ["buildClient", "authenticate", "listInbounds", "createUser", "deleteUser", "syncUserTraffic", "sync"]) {
+  for (const method of ["createUser", "deleteUser", "syncUserTraffic", "sync"]) {
     await assert.rejects(marzbanAdapter[method](), (error) => {
       assert.equal(error.status, 501);
       assert.match(error.message, /Marzban .* is not implemented yet/);
       return true;
     });
   }
+});
+
+test("marzban buildClient normalizes the base URL", async () => {
+  const clientA = buildClient({
+    url: "https://marzban.example.com/",
+    username: "admin",
+    password: "secret"
+  });
+  const clientB = buildClient({
+    url: "https://marzban.example.com",
+    username: "admin",
+    password: "secret"
+  });
+  assert.equal(clientA.baseUrl, "https://marzban.example.com");
+  assert.equal(clientB.baseUrl, "https://marzban.example.com");
+  assert.equal(clientA.authUrl, "https://marzban.example.com/api/admin/token");
+  assert.equal(clientA.inboundsUrl, "https://marzban.example.com/api/inbounds");
+});
+
+test("marzban authenticate and listInbounds use the verified endpoint pattern", async () => {
+  const calls = [];
+  await withMockFetch([
+    {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: "marzban-token" })
+    },
+    {
+      ok: true,
+      status: 200,
+      json: async () => ([
+        { id: 1, remark: "Inbound A", protocol: "vless", enabled: true },
+        { uuid: "uuid-2", name: "Inbound B", streamSettings: { network: "tcp" }, enabled: false }
+      ])
+    }
+  ], calls, async () => {
+    const inbounds = await marzbanAdapter.listInbounds({
+      url: "https://marzban.example.com/",
+      username: "admin",
+      password: "secret"
+    });
+    assert.deepEqual(inbounds, [
+      { id: "1", label: "Inbound A", protocol: "vless", enabled: true },
+      { id: "uuid-2", label: "Inbound B", protocol: "tcp", enabled: false }
+    ]);
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban token and inbounds failures fail clearly", async () => {
+  await withMockFetch([
+    {
+      ok: false,
+      status: 401,
+      json: async () => ({ detail: "invalid" })
+    }
+  ], [], async () => {
+    await assert.rejects(
+      marzbanAdapter.authenticate({
+        authUrl: "https://marzban.example.com/api/admin/token",
+        username: "admin",
+        password: "secret"
+      }),
+      (error) => {
+        assert.equal(error.status, 401);
+        assert.match(error.message, /HTTP 401/);
+        return true;
+      }
+    );
+  });
+
+  await withMockFetch([
+    {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: "marzban-token" })
+    },
+    {
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: "boom" })
+    }
+  ], [], async () => {
+    await assert.rejects(
+      marzbanAdapter.listInbounds({
+        url: "https://marzban.example.com",
+        username: "admin",
+        password: "secret"
+      }),
+      (error) => {
+        assert.equal(error.status, 500);
+        assert.match(error.message, /inbounds request failed/i);
+        return true;
+      }
+    );
+  });
+});
+
+test("marzban missing base URL or credentials fail clearly", async () => {
+  await assert.rejects(
+    marzbanAdapter.buildClient({ username: "admin", password: "secret" }),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.match(error.message, /base URL is required/i);
+      return true;
+    }
+  );
+  await assert.rejects(
+    marzbanAdapter.buildClient({ url: "https://marzban.example.com", username: "admin" }),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.match(error.message, /username and password are required/i);
+      return true;
+    }
+  );
 });
 
 test("marzban sync does not claim success before the adapter is implemented", async () => {
@@ -1037,6 +1157,22 @@ function createMockRequest(method, pathname, session, body, rawBody, remoteAddre
       if (payload) yield Buffer.from(payload);
     }
   };
+}
+
+async function withMockFetch(responses, calls, fn) {
+  const originalFetch = globalThis.fetch;
+  let index = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    const response = responses[index] ?? responses[responses.length - 1];
+    index += 1;
+    return response;
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 test("password hashing verifies the original secret only", () => {
