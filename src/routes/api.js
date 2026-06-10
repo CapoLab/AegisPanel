@@ -434,6 +434,21 @@ export async function handleApi(req, res, route) {
   if (userId && method === "DELETE") {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
+    const panel = store.find("panels", user.panelId);
+    if (panel?.type === "marzban") {
+      const adapter = adapterFor(panel.type);
+      if (!adapter || typeof adapter.deleteUser !== "function") {
+        return sendJson(res, 501, { ok: false, error: "Real user deletion is not available for this panel type yet" });
+      }
+      try {
+        await adapter.deleteUser(panel, user);
+      } catch (error) {
+        return sendJson(res, error.status || 502, {
+          ok: false,
+          error: error.message || "Marzban user deletion failed"
+        });
+      }
+    }
     const owner = store.find("admins", user.ownerAdminId);
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
     const limitBytes = finiteQuotaBytes(user.limitBytes) ?? 0;

@@ -414,6 +414,7 @@ test("put cannot change quota accounting fields", async () => {
 });
 
 test("delete returns at most the reserved bytes", async () => {
+  const calls = [];
   await withTempEnv(
     {
       AEGIS_ADMIN_USERNAME: "env-admin",
@@ -424,70 +425,73 @@ test("delete returns at most the reserved bytes", async () => {
     async () => {
       const handleApi = await importApiFresh();
       const { store } = await import("../src/storage/store.js");
-      const login = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/auth/login",
-        body: { username: "env-admin", password: "env-pass" }
-      });
-      const owner = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/superadmin/admins",
-        session: login.session,
-        body: {
-          username: "cap-admin",
-          password: "admin-pass",
-          trafficLimitBytes: 1000
-        }
-      });
-      const panel = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/superadmin/panels",
-        session: login.session,
-        body: {
-          name: "Panel One",
-          type: "tx-ui",
-          url: "https://panel.example.com"
-        }
-      });
-      const user = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/admin/users",
-        session: login.session,
-        body: {
-          username: "tampered-user",
-          panelId: panel.id,
-          ownerAdminId: owner.id,
-          limitBytes: 500,
-          usedBytes: 100
-        }
-      });
-      store.update("users", user.id, {
-        limitBytes: 1200,
-        usedBytes: 50,
-        reservedBytes: 200
-      });
+      await withMockFetch([], calls, async () => {
+        const login = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/auth/login",
+          body: { username: "env-admin", password: "env-pass" }
+        });
+        const owner = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/superadmin/admins",
+          session: login.session,
+          body: {
+            username: "cap-admin",
+            password: "admin-pass",
+            trafficLimitBytes: 1000
+          }
+        });
+        const panel = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/superadmin/panels",
+          session: login.session,
+          body: {
+            name: "Panel One",
+            type: "tx-ui",
+            url: "https://panel.example.com"
+          }
+        });
+        const user = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/admin/users",
+          session: login.session,
+          body: {
+            username: "tampered-user",
+            panelId: panel.id,
+            ownerAdminId: owner.id,
+            limitBytes: 500,
+            usedBytes: 100
+          }
+        });
+        store.update("users", user.id, {
+          limitBytes: 1200,
+          usedBytes: 50,
+          reservedBytes: 200
+        });
 
-      const before = await callApi(handleApi, {
-        method: "GET",
-        pathname: "/api/superadmin/admins",
-        session: login.session
+        const before = await callApi(handleApi, {
+          method: "GET",
+          pathname: "/api/superadmin/admins",
+          session: login.session
+        });
+        const beforeOwner = before.find((admin) => admin.username === "cap-admin");
+        const deleted = await callApi(handleApi, {
+          method: "DELETE",
+          pathname: `/api/admin/users/${user.id}`,
+          session: login.session
+        });
+        assert.equal(deleted.ok, true);
+        const after = await callApi(handleApi, {
+          method: "GET",
+          pathname: "/api/superadmin/admins",
+          session: login.session
+        });
+        const afterOwner = after.find((admin) => admin.username === "cap-admin");
+        assert.equal(afterOwner.trafficRemainingBytes - beforeOwner.trafficRemainingBytes, 200);
       });
-      const beforeOwner = before.find((admin) => admin.username === "cap-admin");
-      const deleted = await callApi(handleApi, {
-        method: "DELETE",
-        pathname: `/api/admin/users/${user.id}`,
-        session: login.session
-      });
-      assert.equal(deleted.ok, true);
-      const after = await callApi(handleApi, {
-        method: "GET",
-        pathname: "/api/superadmin/admins",
-        session: login.session
-      });
-      const afterOwner = after.find((admin) => admin.username === "cap-admin");
-      assert.equal(afterOwner.trafficRemainingBytes - beforeOwner.trafficRemainingBytes, 200);
     }
   );
+  assert.equal(calls.length, 0);
 });
 
 test("creating a user subtracts traffic from the owner", async () => {
@@ -930,6 +934,239 @@ test("marzban user creation rolls back on remote failure", async () => {
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
 });
 
+test("marzban-backed delete removes remote first and then local state", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "delete-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-1", username: "delete-me", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 204,
+            json: async () => ({})
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "delete-me",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 120,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const beforeDeleteAdmins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const beforeOwner = beforeDeleteAdmins.find((admin) => admin.username === "delete-owner");
+          assert.equal(beforeOwner.trafficRemainingBytes, 700);
+
+          const deleted = await callApi(handleApi, {
+            method: "DELETE",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session
+          });
+          assert.equal(deleted.ok, true);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          assert.equal(users.some((user) => user.username === "delete-me"), false);
+
+          const afterDeleteAdmins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const afterOwner = afterDeleteAdmins.find((admin) => admin.username === "delete-owner");
+          assert.equal(afterOwner.trafficRemainingBytes, 880);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/delete-me");
+  assert.equal(calls[3].options.method, "DELETE");
+  assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban delete failure keeps the local user and quota untouched", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "delete-fail-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-2", username: "keep-me", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "boom" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "keep-me",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 120,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const deleteRes = await callApiWithOutcome(handleApi, {
+            method: "DELETE",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session
+          });
+          assert.equal(deleteRes.statusCode, 500);
+          assert.match(deleteRes.json.error, /Marzban delete user failed with HTTP 500/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          assert.equal(users.some((user) => user.username === "keep-me"), true);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const deleteOwner = admins.find((admin) => admin.username === "delete-fail-owner");
+          assert.equal(deleteOwner.trafficRemainingBytes, 700);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/keep-me");
+});
+
 test("repeated failed login attempts eventually return 429", async () => {
   await withTempEnv(
     {
@@ -1095,13 +1332,52 @@ test("panel credentials are stripped from api responses", async () => {
 });
 
 test("marzban adapter methods are explicit not-implemented skeletons", async () => {
-  for (const method of ["deleteUser", "syncUserTraffic", "sync"]) {
+  for (const method of ["syncUserTraffic", "sync"]) {
     await assert.rejects(marzbanAdapter[method](), (error) => {
       assert.equal(error.status, 501);
       assert.match(error.message, /Marzban .* is not implemented yet/);
       return true;
     });
   }
+});
+
+test("marzban deleteUser sends the verified delete endpoint and treats 404 as success", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: "not found" })
+      }
+    ],
+    calls,
+    async () => {
+      const result = await marzbanAdapter.deleteUser(
+        {
+          url: "https://marzban.example.com/",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice"
+        }
+      );
+
+      assert.deepEqual(result, { ok: true, username: "alice", status: "missing" });
+    }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user/alice");
+  assert.equal(calls[1].options.method, "DELETE");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
 });
 
 test("marzban createUser sends the verified create payload", async () => {
@@ -1245,6 +1521,43 @@ test("marzban createUser rejects empty selected inbounds before remote calls", a
     );
   });
   assert.equal(calls.length, 0);
+});
+
+test("marzban deleteUser fails clearly on remote errors", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: false,
+        status: 500,
+        json: async () => ({ detail: "boom" })
+      }
+    ],
+    [],
+    async () => {
+      await assert.rejects(
+        marzbanAdapter.deleteUser(
+          {
+            url: "https://marzban.example.com",
+            username: "admin",
+            password: "secret"
+          },
+          {
+            username: "alice"
+          }
+        ),
+        (error) => {
+          assert.equal(error.status, 500);
+          assert.match(error.message, /Marzban delete user failed with HTTP 500/);
+          return true;
+        }
+      );
+    }
+  );
 });
 
 test("marzban buildClient normalizes the base URL", async () => {

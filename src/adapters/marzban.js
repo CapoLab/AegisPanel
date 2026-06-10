@@ -179,6 +179,24 @@ export async function createUser(panel, user) {
   };
 }
 
+export async function deleteUser(panel, user) {
+  const client = buildClient(panel);
+  const username = String(user?.username ?? "").trim();
+  if (!username) fail(400, "Marzban username is required");
+  const accessToken = await authenticate(client);
+  const response = await fetch(`${client.baseUrl}/api/user/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (response.status === 404) {
+    return { ok: true, username, status: "missing" };
+  }
+  if (!response.ok && response.status !== 204) {
+    fail(response.status || 502, `Marzban delete user failed with HTTP ${response.status}`);
+  }
+  return { ok: true, username, status: "deleted" };
+}
+
 export const marzbanAdapter = {
   type: "marzban",
   label: "Marzban",
@@ -201,8 +219,8 @@ export const marzbanAdapter = {
   async createUser(panel, user) {
     return createUser(panel, user);
   },
-  async deleteUser() {
-    reject("deleteUser");
+  async deleteUser(panel, user) {
+    return deleteUser(panel, user);
   },
   async syncUserTraffic() {
     reject("syncUserTraffic");
