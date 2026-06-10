@@ -257,6 +257,256 @@ test("existing valid admin user flow still passes", async () => {
   );
 });
 
+test("creating a user subtracts traffic from the owner", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const superLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session,
+        body: {
+          username: "quota-admin",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const ownerBefore = owner.trafficRemainingBytes;
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: superLogin.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: superLogin.session,
+        body: {
+          username: "quota-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 400
+        }
+      });
+      assert.equal(user.limitBytes, 400);
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session
+      });
+      const updatedOwner = admins.find((admin) => admin.username === "quota-admin");
+      assert.equal(updatedOwner.trafficRemainingBytes, ownerBefore - 400);
+    }
+  );
+});
+
+test("creating a user fails when the owner has insufficient traffic", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const superLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session,
+        body: {
+          username: "small-quota-admin",
+          password: "admin-pass",
+          trafficLimitBytes: 100
+        }
+      });
+      const ownerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "small-quota-admin", password: "admin-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: superLogin.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: superLogin.session,
+        body: {
+          username: "too-much",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 101
+        }
+      });
+      assert.equal(res.statusCode, 409);
+      assert.match(res.json.error, /Insufficient traffic quota/i);
+    }
+  );
+});
+
+test("deleting a user returns only unused traffic", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const superLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session,
+        body: {
+          username: "delete-quota-admin",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: superLogin.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: superLogin.session,
+        body: {
+          username: "delete-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 500,
+          usedBytes: 200
+        }
+      });
+      const deleted = await callApi(handleApi, {
+        method: "DELETE",
+        pathname: `/api/admin/users/${user.id}`,
+        session: superLogin.session
+      });
+      assert.equal(deleted.ok, true);
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session
+      });
+      const updatedOwner = admins.find((admin) => admin.username === "delete-quota-admin");
+      assert.equal(updatedOwner.trafficRemainingBytes, owner.trafficRemainingBytes - user.limitBytes + (user.limitBytes - user.usedBytes));
+    }
+  );
+});
+
+test("deleting an overused user does not increase owner traffic", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const superLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session,
+        body: {
+          username: "overused-admin",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: superLogin.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: superLogin.session,
+        body: {
+          username: "overused-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 300,
+          usedBytes: 450
+        }
+      });
+      const afterCreateAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session
+      });
+      const ownerAfterCreate = afterCreateAdmins.find((admin) => admin.username === "overused-admin");
+      const deleted = await callApi(handleApi, {
+        method: "DELETE",
+        pathname: `/api/admin/users/${user.id}`,
+        session: superLogin.session
+      });
+      assert.equal(deleted.ok, true);
+      const afterDeleteAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: superLogin.session
+      });
+      const ownerAfterDelete = afterDeleteAdmins.find((admin) => admin.username === "overused-admin");
+      assert.equal(ownerAfterDelete.trafficRemainingBytes, ownerAfterCreate.trafficRemainingBytes);
+    }
+  );
+});
+
 test("repeated failed login attempts eventually return 429", async () => {
   await withTempEnv(
     {

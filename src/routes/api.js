@@ -106,6 +106,10 @@ function scopedPanels(actor) {
   return store.list("panels").filter((panel) => panel.id === actor.panelId);
 }
 
+function finiteQuotaBytes(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function dashboard(actor) {
   const panels = scopedPanels(actor);
   const users = scopedUsers(actor);
@@ -313,8 +317,20 @@ export async function handleApi(req, res, route) {
     const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
+    const requestedLimitBytes = Number(body.limitBytes || 0);
+    const owner = store.find("admins", actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id);
+    if (!owner) return sendJson(res, 400, { ok: false, error: "Valid ownerAdminId is required" });
+    const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
+    if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
+      if (ownerRemainingBytes < requestedLimitBytes) {
+        return sendJson(res, 409, { ok: false, error: "Insufficient traffic quota" });
+      }
+      store.update("admins", owner.id, {
+        trafficRemainingBytes: ownerRemainingBytes - requestedLimitBytes
+      });
+    }
     const user = store.insert("users", {
-      ownerAdminId: actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id,
+      ownerAdminId: owner.id,
       panelId: panel.id,
       username,
       uuid: body.uuid || null,
@@ -322,7 +338,7 @@ export async function handleApi(req, res, route) {
       inboundId: body.inboundId || "default",
       flow: body.flow || "",
       active: body.active !== false,
-      limitBytes: Number(body.limitBytes || 0),
+      limitBytes: requestedLimitBytes,
       usedBytes: Number(body.usedBytes || 0),
       expiresAt: body.expiresAt || null
     });
@@ -343,10 +359,11 @@ export async function handleApi(req, res, route) {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const owner = store.find("admins", user.ownerAdminId);
-    if (owner?.deleteReturnTraffic && user.limitBytes > user.usedBytes) {
-      const returned = user.limitBytes - user.usedBytes;
+    const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
+    const returned = Math.max(Number(user.limitBytes || 0) - Number(user.usedBytes || 0), 0);
+    if (owner?.deleteReturnTraffic && ownerRemainingBytes !== null && returned > 0) {
       store.update("admins", owner.id, {
-        trafficRemainingBytes: Number(owner.trafficRemainingBytes || 0) + returned
+        trafficRemainingBytes: ownerRemainingBytes + returned
       });
       store.state.trafficEvents.unshift({
         id: `evt_${Date.now()}`,
