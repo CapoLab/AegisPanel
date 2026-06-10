@@ -133,7 +133,7 @@ function parseSelectedInbounds(user) {
   return grouped;
 }
 
-function buildCreateUserPayload(user) {
+function buildUserPayload(user, { status = "active", note = "" } = {}) {
   const inboundGroups = parseSelectedInbounds(user);
   const protocols = Object.keys(inboundGroups);
   if (!protocols.length) fail(400, "At least one inbound must be selected for Marzban");
@@ -149,13 +149,13 @@ function buildCreateUserPayload(user) {
   if (!username) fail(400, "Marzban username is required");
   return {
     username,
-    status: "active",
+    status,
     expire,
     data_limit: dataLimit > 0 ? dataLimit : 0,
     data_limit_reset_strategy: "no_reset",
     inbounds,
     proxies,
-    note: "",
+    note,
     on_hold_expire_duration: 0,
     on_hold_timeout: null,
     next_plan: {
@@ -180,7 +180,7 @@ export async function listInbounds(panel) {
 
 export async function createUser(panel, user) {
   const client = buildClient(panel);
-  const body = buildCreateUserPayload(user);
+  const body = buildUserPayload(user);
   const accessToken = await authenticate(client);
   const response = await fetch(`${client.baseUrl}/api/user`, {
     method: "POST",
@@ -198,6 +198,49 @@ export async function createUser(panel, user) {
     id: payload?.id ?? payload?.data?.id ?? payload?.username ?? user?.username ?? null,
     username: payload?.username ?? payload?.data?.username ?? user?.username ?? null,
     status: payload?.status ?? payload?.data?.status ?? "active"
+  };
+}
+
+export async function updateUser(panel, user, changes = {}) {
+  const client = buildClient(panel);
+  const merged = {
+    ...user,
+    ...changes,
+    inboundIds: Array.isArray(changes.inboundIds) ? changes.inboundIds : user?.inboundIds,
+    expiresAt: Object.prototype.hasOwnProperty.call(changes, "expiresAt") ? changes.expiresAt : user?.expiresAt,
+    flow: Object.prototype.hasOwnProperty.call(changes, "flow") ? changes.flow : user?.flow,
+    active: Object.prototype.hasOwnProperty.call(changes, "active") ? changes.active : user?.active
+  };
+  const body = buildUserPayload(merged, {
+    status: merged.active === false ? "disabled" : "active",
+    note: String(merged.flow ?? "")
+  });
+  const username = String(user?.username ?? "").trim();
+  if (!username) fail(400, "Marzban username is required");
+  const accessToken = await authenticate(client);
+  const response = await fetch(`${client.baseUrl}/api/user/${encodeURIComponent(username)}`, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok && response.status !== 200 && response.status !== 204) {
+    fail(response.status || 502, `Marzban update user failed with HTTP ${response.status}`);
+  }
+  if (response.status === 204) {
+    return {
+      id: user?.id ?? username,
+      username,
+      status: body.status
+    };
+  }
+  const payload = await response.json();
+  return {
+    id: payload?.id ?? payload?.data?.id ?? payload?.username ?? username,
+    username: payload?.username ?? payload?.data?.username ?? username,
+    status: payload?.status ?? payload?.data?.status ?? body.status
   };
 }
 
@@ -263,6 +306,9 @@ export const marzbanAdapter = {
   },
   async createUser(panel, user) {
     return createUser(panel, user);
+  },
+  async updateUser(panel, user, changes) {
+    return updateUser(panel, user, changes);
   },
   async deleteUser(panel, user) {
     return deleteUser(panel, user);
