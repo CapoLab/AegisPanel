@@ -13,6 +13,9 @@ const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 
 function publicAdmin(admin) {
   const { passwordHash, ...safe } = admin;
+  if (safe.validUntil == null && safe.expiresAt != null) {
+    safe.validUntil = safe.expiresAt;
+  }
   return safe;
 }
 
@@ -110,6 +113,12 @@ function finiteQuotaBytes(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function finiteDateMs(value) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
 function parseNonNegativeFiniteBytes(value, key, { allowMissing = false, defaultValue = 0 } = {}) {
   if (value === undefined) {
     if (allowMissing) return defaultValue;
@@ -123,6 +132,39 @@ function parseNonNegativeFiniteBytes(value, key, { allowMissing = false, default
     throw error;
   }
   return value;
+}
+
+function normalizeIsoDateOrNull(value, key) {
+  if (value == null || value === "") return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  return date.toISOString();
+}
+
+function enforceResellerValidity(actor, expiresAt) {
+  if (actor.role !== "admin") return;
+  const validUntilMs = finiteDateMs(actor.validUntil ?? actor.expiresAt);
+  if (validUntilMs === null) return;
+  if (Date.now() > validUntilMs) {
+    const error = new Error("Reseller validity has expired.");
+    error.status = 400;
+    throw error;
+  }
+  if (expiresAt == null || expiresAt === "") {
+    const error = new Error("VPN account expiry is required for resellers with a validity limit.");
+    error.status = 400;
+    throw error;
+  }
+  const expiresAtMs = finiteDateMs(expiresAt);
+  if (expiresAtMs === null || expiresAtMs > validUntilMs) {
+    const error = new Error("VPN account expiry cannot exceed reseller validity.");
+    error.status = 400;
+    throw error;
+  }
 }
 
 function dashboard(actor) {
@@ -213,6 +255,7 @@ export async function handleApi(req, res, route) {
     const body = await readJson(req);
     const username = requiredString(body, "username");
     const password = requiredString(body, "password");
+    const validity = normalizeIsoDateOrNull(body.validUntil ?? body.expiresAt, "validUntil");
     if (store.list("admins").some((admin) => admin.username === username)) {
       return sendJson(res, 409, { ok: false, error: "Username already exists" });
     }
@@ -227,7 +270,8 @@ export async function handleApi(req, res, route) {
       trafficRemainingBytes: body.trafficLimitBytes ?? null,
       updateReturnTraffic: body.updateReturnTraffic !== false,
       deleteReturnTraffic: body.deleteReturnTraffic !== false,
-      expiresAt: body.expiresAt || null
+      validUntil: validity,
+      expiresAt: validity
     });
     store.audit(superadmin, "admin.create", admin.id, { username: admin.username });
     return sendJson(res, 201, { ok: true, data: publicAdmin(admin) });
@@ -338,6 +382,7 @@ export async function handleApi(req, res, route) {
     const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
+    enforceResellerValidity(actor, body.expiresAt);
     const requestedLimitBytes = Object.prototype.hasOwnProperty.call(body, "limitBytes")
       ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes")
       : 0;

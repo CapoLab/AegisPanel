@@ -292,6 +292,317 @@ test("existing valid admin user flow still passes", async () => {
   );
 });
 
+test("reseller validity persists on create and legacy resellers without validity still work", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "tx-ui",
+          url: "https://panel.example.com"
+        }
+      });
+      const validUntil = "2030-01-02T23:59:59.000Z";
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-valid",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          validUntil
+        }
+      });
+      assert.equal(reseller.validUntil, validUntil);
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      assert.equal(admins.find((admin) => admin.username === "reseller-valid").validUntil, validUntil);
+
+      const legacyReseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-legacy",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      assert.equal(legacyReseller.validUntil ?? null, null);
+
+      const legacyLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "reseller-legacy", password: "admin-pass" }
+      });
+      const vpnAccount = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: legacyLogin.session,
+        body: {
+          username: "legacy-client",
+          panelId: panel.id
+        }
+      });
+      assert.equal(vpnAccount.username, "legacy-client");
+    }
+  );
+});
+
+test("reseller validity blocks invalid vpn account expiries before remote create", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-expiry",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          validUntil: "2030-01-02T23:59:59.000Z"
+        }
+      });
+
+      await withMockFetch([], calls, async () => {
+        await withMockDateNow(new Date("2030-01-01T12:00:00.000Z").getTime(), async () => {
+          const resellerLogin = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            body: { username: reseller.username, password: "admin-pass" }
+          });
+          const missingExpiry = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "client-missing",
+              panelId: panel.id,
+              limitBytes: 100,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+          assert.equal(missingExpiry.statusCode, 400);
+          assert.match(missingExpiry.json.error, /VPN account expiry is required for resellers with a validity limit\./i);
+
+          const tooLate = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "client-late",
+              panelId: panel.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-03T23:59:59.000Z",
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+          assert.equal(tooLate.statusCode, 400);
+          assert.match(tooLate.json.error, /VPN account expiry cannot exceed reseller validity\./i);
+        });
+
+        await withMockDateNow(new Date("2030-01-03T12:00:00.000Z").getTime(), async () => {
+          const resellerLogin = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            body: { username: reseller.username, password: "admin-pass" }
+          });
+          const expired = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "client-expired",
+              panelId: panel.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+          assert.equal(expired.statusCode, 400);
+          assert.match(expired.json.error, /Reseller validity has expired\./i);
+        });
+      });
+    }
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("reseller validity allows vpn account expiry within limit and superadmin is not restricted", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const marzbanPanel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-safe",
+          password: "admin-pass",
+          role: "admin",
+          panelId: marzbanPanel.id,
+          trafficLimitBytes: 1000,
+          validUntil: "2030-01-02T23:59:59.000Z"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user" })
+          }
+        ],
+        calls,
+        async () => {
+          await withMockDateNow(new Date("2030-01-01T12:00:00.000Z").getTime(), async () => {
+            const resellerLogin = await callApi(handleApi, {
+              method: "POST",
+              pathname: "/api/auth/login",
+              body: { username: reseller.username, password: "admin-pass" }
+            });
+            const allowed = await callApi(handleApi, {
+              method: "POST",
+              pathname: "/api/admin/users",
+              session: resellerLogin.session,
+              body: {
+                username: "client-ok",
+                panelId: marzbanPanel.id,
+                limitBytes: 100,
+                expiresAt: "2030-01-02T23:59:59.000Z",
+                inboundIds: ["vless:WS TLS:10002"],
+                inboundId: "vless:WS TLS:10002"
+              }
+            });
+            assert.equal(allowed.username, "client-ok");
+          });
+        }
+      );
+      assert.equal(calls.length, 2);
+
+      const superadmin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "super-valid",
+          password: "super-pass",
+          role: "superadmin",
+          validUntil: "2000-01-01T23:59:59.000Z"
+        }
+      });
+      const superLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: superadmin.username, password: "super-pass" }
+      });
+      const txPanel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Tx Panel",
+          type: "tx-ui",
+          url: "https://panel.example.com"
+        }
+      });
+      const superUser = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: superLogin.session,
+        body: {
+          username: "super-client",
+          panelId: txPanel.id,
+          limitBytes: 100,
+          expiresAt: null
+        }
+      });
+      assert.equal(superUser.username, "super-client");
+    }
+  );
+});
+
 test("invalid quota values are rejected on user create", async () => {
   await withTempEnv(
     {

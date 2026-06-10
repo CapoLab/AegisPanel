@@ -165,7 +165,7 @@ function shell(content) {
           <div class="mark">A</div>
           <div>
             <strong>AegisPanel</strong>
-            <span>${esc(state.admin?.username)} / ${esc(roleLabel(state.admin?.role))}</span>
+            <span>${esc(state.admin?.username)} / ${esc(roleLabel(state.admin?.role))}${state.admin?.validUntil ? ` · ${esc(dateShort(state.admin.validUntil))}` : ""}</span>
           </div>
         </div>
         <nav class="nav">${nav()}</nav>
@@ -292,12 +292,13 @@ function admins() {
       <p class="muted section-note">Resellers receive quota and validity from SuperAdmin. Future reseller limits should stay within the assigned validity window.</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Username</th><th>Role</th><th>Panel</th><th>Traffic</th><th>Return</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Username</th><th>Role</th><th>Valid until</th><th>Panel</th><th>Traffic</th><th>Return</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${state.admins.map((a) => `
               <tr>
                 <td><strong>${esc(a.username)}</strong></td>
                 <td><span class="badge">${esc(roleLabel(a.role))}</span></td>
+                <td>${esc(a.validUntil ? dateShort(a.validUntil) : "Unlimited")}</td>
                 <td>${esc(panelName(a.panelId))}</td>
                 <td>${a.trafficLimitBytes ? bytes(a.trafficLimitBytes) : "Unlimited"}</td>
                 <td>${a.deleteReturnTraffic ? "Delete" : "-"} ${a.updateReturnTraffic ? "Update" : ""}</td>
@@ -459,6 +460,7 @@ function showAdminForm() {
       <label>Role<select name="role"><option value="admin">Reseller</option><option value="superadmin">SuperAdmin</option></select></label>
       <label>Panel<select name="panelId"><option value="">No fixed panel</option>${(state.data?.panels || []).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
       <label>Traffic limit (GB)<input name="trafficGb" type="number" min="0" step="1" placeholder="100" /></label>
+      <label>Valid until<input name="validUntilDate" type="date" /></label>
       <div class="check-row"><label><input name="deleteReturnTraffic" type="checkbox" checked /> Return traffic on delete</label><label><input name="updateReturnTraffic" type="checkbox" checked /> Return traffic on update</label></div>
       <button class="primary" type="submit">Create reseller</button>
     </form>
@@ -740,6 +742,7 @@ async function createAdmin(event) {
         role: form.get("role"),
         panelId: form.get("panelId") || null,
         trafficLimitBytes: form.get("trafficGb") ? gbToBytes(form.get("trafficGb")) : null,
+        validUntil: resolveLocalDateEndOfDay(form.get("validUntilDate")),
         deleteReturnTraffic: form.has("deleteReturnTraffic"),
         updateReturnTraffic: form.has("updateReturnTraffic")
       }
@@ -795,9 +798,14 @@ async function createUser(event) {
 function resolveCreateUserExpiry(form) {
   const value = state.createUserExpiryDate || form.get("expiresAtDate") || "";
   if (!value) return null;
+  return resolveLocalDateEndOfDay(value, "Please select a valid expiry date.");
+}
+
+function resolveLocalDateEndOfDay(value, errorMessage = "Please select a valid date.") {
+  if (!value) return null;
   const date = new Date(`${value}T23:59:59`);
   if (Number.isNaN(date.getTime())) {
-    throw new Error("Please select a valid expiry date.");
+    throw new Error(errorMessage);
   }
   return date.toISOString();
 }

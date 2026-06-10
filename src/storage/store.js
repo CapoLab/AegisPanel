@@ -29,6 +29,7 @@ function seed() {
         trafficRemainingBytes: null,
         updateReturnTraffic: true,
         deleteReturnTraffic: true,
+        validUntil: null,
         expiresAt: null,
         createdAt: now(),
         updatedAt: now()
