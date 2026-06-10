@@ -25,6 +25,39 @@ const state = {
 const app = document.querySelector("#app");
 document.documentElement.dataset.theme = state.theme;
 
+function isSuperadmin() {
+  return state.admin?.role === "superadmin";
+}
+
+function isReseller() {
+  return state.admin?.role === "admin";
+}
+
+function roleScopedViews() {
+  return isReseller() ? ["dashboard", "users"] : ["dashboard", "panels", "admins", "users", "operations"];
+}
+
+function requireSuperadminUi() {
+  if (isSuperadmin()) return true;
+  state.error = "Insufficient permissions";
+  renderApp();
+  return false;
+}
+
+function resetRoleScopedState() {
+  state.admins = [];
+  state.logs = [];
+  state.news = [];
+  state.system = null;
+}
+
+function normalizeViewForRole() {
+  if (isReseller() && !roleScopedViews().includes(state.view)) {
+    state.view = "dashboard";
+    localStorage.setItem("aegis.view", state.view);
+  }
+}
+
 async function api(path, options = {}) {
   const headers = { "content-type": "application/json", ...(options.headers || {}) };
   if (state.session) headers["x-aegis-session"] = state.session;
@@ -92,6 +125,12 @@ function logout() {
   localStorage.removeItem("aegis.admin");
   state.session = null;
   state.admin = null;
+  resetRoleScopedState();
+  state.users = [];
+  state.data = null;
+  state.meta = null;
+  state.notice = "";
+  state.error = "";
   renderLogin();
 }
 
@@ -99,14 +138,21 @@ async function load() {
   try {
     state.meta = await api("/api/meta");
     state.data = await api("/api/dashboard");
-    if (state.admin?.role === "superadmin") {
+    if (state.data?.actor) {
+      state.admin = state.data.actor;
+      localStorage.setItem("aegis.admin", JSON.stringify(state.admin));
+    }
+    if (isSuperadmin()) {
       state.admins = await api("/api/superadmin/admins");
       state.logs = await api("/api/superadmin/logs");
       state.news = await api("/api/superadmin/news");
       state.system = await api("/api/superadmin/system");
+    } else {
+      resetRoleScopedState();
     }
     state.users = await api("/api/admin/users");
     state.error = "";
+    normalizeViewForRole();
     renderApp();
   } catch (error) {
     state.error = error.message;
@@ -143,13 +189,18 @@ function renderLogin() {
 }
 
 function nav() {
-  const items = [
-    ["dashboard", "Dashboard", "Overview and live totals"],
-    ["panels", "Panels", "Panel registry and sync"],
-    ["admins", "Resellers", "SuperAdmin and reseller accounts"],
-    ["users", "VPN Accounts", "Customers and traffic"],
-    ["operations", "Operations", "Backup, logs, system"]
-  ];
+  const items = isReseller()
+    ? [
+        ["dashboard", "Dashboard", "Your quota and validity"],
+        ["users", "VPN Accounts", "Customers and traffic"]
+      ]
+    : [
+        ["dashboard", "Dashboard", "Overview and live totals"],
+        ["panels", "Panels", "Panel registry and sync"],
+        ["admins", "Resellers", "SuperAdmin and reseller accounts"],
+        ["users", "VPN Accounts", "Customers and traffic"],
+        ["operations", "Operations", "Backup, logs, system"]
+      ];
   return items.map(([key, label, hint]) => `
     <button class="${state.view === key ? "active" : ""}" onclick="window.Aegis.view('${key}')">
       <span>${label}</span><small>${hint}</small>
@@ -213,6 +264,65 @@ function roleLabel(role) {
 function dashboard() {
   const totals = state.data?.totals || {};
   const distribution = state.data?.distribution || {};
+  if (isReseller()) {
+    const assignedPanel = panelName(state.admin?.panelId);
+    const quotaLimit = Number(state.admin?.trafficLimitBytes || 0);
+    const quotaRemaining = Number(state.admin?.trafficRemainingBytes ?? state.admin?.trafficLimitBytes ?? 0);
+    const quotaUsed = Math.max(0, quotaLimit - quotaRemaining);
+    const users = state.users || [];
+    return `
+      ${pageTitle("Dashboard", "Your reseller workspace for quota, validity, and VPN account creation.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
+      <section class="card section">
+        <p class="muted section-note">You can create VPN accounts within your assigned quota and validity.</p>
+        <div class="metrics">
+          ${metric("Assigned Panel", assignedPanel, "scoped panel")}
+          ${metric("Traffic Limit", state.admin?.trafficLimitBytes == null ? "Unlimited" : bytes(state.admin.trafficLimitBytes), "assigned quota")}
+          ${metric("Traffic Remaining", state.admin?.trafficRemainingBytes == null ? "Unlimited" : bytes(state.admin.trafficRemainingBytes), "available")}
+          ${metric("Used Traffic", bytes(quotaUsed), "consumed")}
+          ${metric("Active VPN Accounts", users.filter((user) => user.active).length, "currently active")}
+          ${metric("Total VPN Accounts", users.length, "all scoped accounts")}
+        </div>
+        <div class="reseller-summary">
+          <table class="table compact-table">
+            <tbody>
+              <tr><td>Valid until</td><td>${esc(state.admin?.validUntil ? dateShort(state.admin.validUntil) : "Unlimited")}</td></tr>
+              <tr><td>Panel</td><td>${esc(assignedPanel)}</td></tr>
+              <tr><td>Notes</td><td>VPN account expiry must stay within your reseller validity window.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card section">
+        <div class="card-head"><h3>VPN Accounts</h3><button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button></div>
+        ${users.length ? `
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>VPN Account</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                ${users.map((u) => `
+                  <tr>
+                    <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
+                    <td>${esc(panelName(u.panelId))}</td>
+                    <td>${esc(u.inboundId || "default")}</td>
+                    <td>${bytes(u.usedBytes)}</td>
+                    <td>${bytes(u.limitBytes)}</td>
+                    <td>${dateShort(u.expiresAt)}</td>
+                    <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
+                    <td class="row-actions">
+                      <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
+                        ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
+                      </button>
+                      <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : `<p class="muted">No VPN accounts yet.</p>`}
+      </section>
+    `;
+  }
   return `
     ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, VPN accounts, traffic, and operations.")}
     <section class="metrics">
@@ -405,6 +515,7 @@ function panelName(id) {
 
 function renderApp() {
   if (!state.session) return renderLogin();
+  normalizeViewForRole();
   const views = { dashboard, panels, admins, users, operations };
   shell((views[state.view] || dashboard)());
 }
@@ -439,6 +550,7 @@ function htmlToElement(html) {
 }
 
 function showPanelForm() {
+  if (!requireSuperadminUi()) return;
   modal("New panel", `
     <form class="form" onsubmit="window.Aegis.createPanel(event)">
       <label>Name<input name="name" required placeholder="Edge Tehran 01" /></label>
@@ -453,6 +565,7 @@ function showPanelForm() {
 }
 
 function showAdminForm() {
+  if (!requireSuperadminUi()) return;
   modal("New reseller", `
     <form class="form" onsubmit="window.Aegis.createAdmin(event)">
       <label>Username<input name="username" required placeholder="reseller-01" /></label>
@@ -710,6 +823,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
 }
 
 function showNewsForm() {
+  if (!requireSuperadminUi()) return;
   modal("Add news", `
     <form class="form" onsubmit="window.Aegis.createNews(event)">
       <label>Title<input name="title" required placeholder="Maintenance" /></label>
@@ -822,6 +936,7 @@ async function createNews(event) {
 }
 
 async function syncPanel(id) {
+  if (!requireSuperadminUi()) return;
   await runAction(async () => {
     const result = await api(`/api/panels/${id}/sync`, { method: "POST" });
     state.notice = `Sync complete: pulled ${result.pulled}, pushed ${result.pushed}`;
@@ -829,6 +944,7 @@ async function syncPanel(id) {
 }
 
 async function loadPanelInbounds(id) {
+  if (!requireSuperadminUi()) return;
   modal("Panel inbounds", `<p class="muted">Loading inbounds...</p>`);
   try {
     const rows = await api(`/api/superadmin/panels/${id}/inbounds`);
@@ -883,11 +999,13 @@ async function syncUserTraffic(id) {
 }
 
 async function deletePanel(id) {
+  if (!requireSuperadminUi()) return;
   if (!confirm("Delete this panel?")) return;
   await runAction(() => api(`/api/superadmin/panels/${id}`, { method: "DELETE" }), "Panel deleted");
 }
 
 async function deleteAdmin(id) {
+  if (!requireSuperadminUi()) return;
   if (!confirm("Delete this reseller?")) return;
   await runAction(() => api(`/api/superadmin/admins/${id}`, { method: "DELETE" }), "Reseller deleted");
 }
@@ -912,6 +1030,7 @@ async function runAction(action, message) {
 }
 
 async function downloadBackup() {
+  if (!requireSuperadminUi()) return;
   const backup = await api("/api/superadmin/backup");
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
