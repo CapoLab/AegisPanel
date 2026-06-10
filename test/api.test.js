@@ -258,7 +258,7 @@ test("existing valid admin user flow still passes", async () => {
         session: login.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -298,7 +298,7 @@ test("invalid quota values are rejected on user create", async () => {
         session: login.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -366,7 +366,7 @@ test("put cannot change quota accounting fields", async () => {
         session: login.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -430,7 +430,7 @@ test("delete returns at most the reserved bytes", async () => {
         session: login.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -507,7 +507,7 @@ test("creating a user subtracts traffic from the owner", async () => {
         session: superLogin.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -565,7 +565,7 @@ test("creating a user fails when the owner has insufficient traffic", async () =
         session: superLogin.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -617,7 +617,7 @@ test("deleting a user returns only unused traffic", async () => {
         session: superLogin.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -681,7 +681,7 @@ test("deleting an overused user does not increase owner traffic", async () => {
         session: superLogin.session,
         body: {
           name: "Panel One",
-          type: "marzban",
+          type: "tx-ui",
           url: "https://panel.example.com"
         }
       });
@@ -718,6 +718,199 @@ test("deleting an overused user does not increase owner traffic", async () => {
       assert.equal(ownerAfterDelete.trafficRemainingBytes, ownerAfterCreate.trafficRemainingBytes);
     }
   );
+});
+
+test("marzban-backed user creation reserves quota and calls the remote create api", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "marz-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-1", username: "marz-user", status: "active" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "marz-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 250,
+              usedBytes: 25,
+              inboundIds: ["vless:WS TLS:10002"],
+              expiresAt: "2030-01-02T03:04:05.000Z"
+            }
+          });
+
+          assert.equal(created.username, "marz-user");
+          assert.equal(created.panelId, panel.id);
+          assert.equal(created.limitBytes, 250);
+          assert.equal(created.usedBytes, 25);
+        }
+      );
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfter = admins.find((admin) => admin.username === "marz-owner");
+      assert.equal(ownerAfter.trafficRemainingBytes, 750);
+    }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban user creation rolls back on remote failure", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "rollback-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      const beforeAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const beforeOwner = beforeAdmins.find((admin) => admin.username === "rollback-owner");
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "boom" })
+          }
+        ],
+        calls,
+        async () => {
+          const res = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "marz-fail",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 10,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          assert.equal(res.statusCode, 500);
+          assert.match(res.json.error, /Marzban create user failed with HTTP 500/i);
+        }
+      );
+
+      const users = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: login.session
+      });
+      assert.equal(users.some((user) => user.username === "marz-fail"), false);
+
+      const afterAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const afterOwner = afterAdmins.find((admin) => admin.username === "rollback-owner");
+      assert.equal(afterOwner.trafficRemainingBytes, beforeOwner.trafficRemainingBytes);
+    }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
 });
 
 test("repeated failed login attempts eventually return 429", async () => {

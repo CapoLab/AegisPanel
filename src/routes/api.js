@@ -355,6 +355,11 @@ export async function handleApi(req, res, route) {
         trafficRemainingBytes: ownerRemainingBytes - requestedLimitBytes
       });
     }
+    const inboundIds = Array.isArray(body.inboundIds)
+      ? body.inboundIds.filter((value) => typeof value === "string" && value.trim())
+      : typeof body.inboundId === "string" && body.inboundId.trim()
+        ? [body.inboundId.trim()]
+        : [];
     const user = store.insert("users", {
       ownerAdminId: owner.id,
       panelId: panel.id,
@@ -369,6 +374,36 @@ export async function handleApi(req, res, route) {
       reservedBytes: requestedLimitBytes,
       expiresAt: body.expiresAt || null
     });
+    if (panel.type === "marzban") {
+      const adapter = adapterFor(panel.type);
+      if (!adapter || typeof adapter.createUser !== "function") {
+        if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
+          store.update("admins", owner.id, {
+            trafficRemainingBytes: ownerRemainingBytes
+          });
+        }
+        store.remove("users", user.id);
+        return sendJson(res, 501, { ok: false, error: "Real user creation is not available for this panel type yet" });
+      }
+      try {
+        await adapter.createUser(panel, {
+          ...user,
+          inboundIds,
+          expiresAt: body.expiresAt || null
+        });
+      } catch (error) {
+        if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
+          store.update("admins", owner.id, {
+            trafficRemainingBytes: ownerRemainingBytes
+          });
+        }
+        store.remove("users", user.id);
+        return sendJson(res, error.status || 502, {
+          ok: false,
+          error: error.message || "Marzban user creation failed"
+        });
+      }
+    }
     store.audit(actor, "user.create", user.id, { username: user.username });
     return sendJson(res, 201, { ok: true, data: user });
   }
