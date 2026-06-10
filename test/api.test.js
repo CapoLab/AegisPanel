@@ -273,6 +273,21 @@ test("existing valid admin user flow still passes", async () => {
       });
       assert.equal(user.username, "user-one");
       assert.equal(user.panelId, panel.id);
+      assert.equal(user.inboundId, "default");
+      assert.equal("inboundIds" in user, false);
+
+      const inboundUser = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "user-two",
+          panelId: panel.id,
+          inboundId: "vless:ws:10001"
+        }
+      });
+      assert.equal(inboundUser.inboundId, "vless:ws:10001");
+      assert.deepEqual(inboundUser.inboundIds, ["vless:ws:10001"]);
     }
   );
 });
@@ -793,6 +808,8 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
           assert.equal(created.panelId, panel.id);
           assert.equal(created.limitBytes, 250);
           assert.equal(created.usedBytes, 25);
+          assert.equal(created.inboundId, "vless:WS TLS:10002");
+          assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002"]);
         }
       );
       const admins = await callApi(handleApi, {

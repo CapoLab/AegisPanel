@@ -360,19 +360,26 @@ export async function handleApi(req, res, route) {
       : typeof body.inboundId === "string" && body.inboundId.trim()
         ? [body.inboundId.trim()]
         : [];
-    const user = store.insert("users", {
+    const primaryInboundId = inboundIds[0] || (typeof body.inboundId === "string" && body.inboundId.trim()) || "default";
+    const userRecord = {
       ownerAdminId: owner.id,
       panelId: panel.id,
       username,
       uuid: body.uuid || null,
       subscriptionId: body.subscriptionId || null,
-      inboundId: body.inboundId || "default",
+      inboundId: primaryInboundId,
       flow: body.flow || "",
       active: body.active !== false,
       limitBytes: requestedLimitBytes,
       usedBytes: requestedUsedBytes,
       reservedBytes: requestedLimitBytes,
       expiresAt: body.expiresAt || null
+    };
+    if (inboundIds.length > 0) {
+      userRecord.inboundIds = inboundIds;
+    }
+    const user = store.insert("users", {
+      ...userRecord
     });
     if (panel.type === "marzban") {
       const adapter = adapterFor(panel.type);
