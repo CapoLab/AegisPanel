@@ -933,10 +933,10 @@ test("marzban authenticate and listInbounds use the verified endpoint pattern", 
       username: "admin",
       password: "secret"
     });
-    assert.deepEqual(inbounds, [
-      { id: "1", label: "Inbound A", protocol: "vless", enabled: true },
-      { id: "uuid-2", label: "Inbound B", protocol: "tcp", enabled: false }
-    ]);
+      assert.deepEqual(inbounds, [
+        { id: "1", label: "Inbound A", protocol: "vless", network: "", tls: "", port: null, enabled: true },
+        { id: "Inbound B", label: "Inbound B", protocol: "", network: "tcp", tls: "", port: null, enabled: false }
+      ]);
   });
 
   assert.equal(calls.length, 2);
@@ -944,6 +944,63 @@ test("marzban authenticate and listInbounds use the verified endpoint pattern", 
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
   assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban listInbounds flattens grouped protocol responses", async () => {
+  const calls = [];
+  await withMockFetch([
+    {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: "marzban-token" })
+    },
+    {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        vless: [
+          { tag: "Falkenstein VLESS WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
+        ],
+        vmess: [
+          { tag: "Falkenstein VMess WS TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
+        ]
+      })
+    }
+  ], calls, async () => {
+    const inbounds = await marzbanAdapter.listInbounds({
+      url: "https://marzban.example.com",
+      username: "admin",
+      password: "secret"
+    });
+    assert.deepEqual(inbounds, [
+      {
+        id: "vless:Falkenstein VLESS WS TLS:10002",
+        label: "Falkenstein VLESS WS TLS",
+        protocol: "vless",
+        network: "ws",
+        tls: "tls",
+        port: 10002,
+        enabled: true
+      },
+      {
+        id: "vmess:Falkenstein VMess WS TLS:10001",
+        label: "Falkenstein VMess WS TLS",
+        protocol: "vmess",
+        network: "ws",
+        tls: "tls",
+        port: 10001,
+        enabled: true
+      }
+    ]);
+    for (const inbound of inbounds) {
+      assert.equal("token" in inbound, false);
+      assert.equal("credentials" in inbound, false);
+      assert.equal("secret" in inbound, false);
+    }
+  });
+
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
 });
 
 test("marzban token and inbounds failures fail clearly", async () => {

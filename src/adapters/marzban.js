@@ -27,6 +27,14 @@ function readCredential(panel, keys) {
   return "";
 }
 
+function stableInboundId(inbound, fallbackProtocol = "") {
+  if (inbound?.id !== undefined && inbound?.id !== null && `${inbound.id}`.trim()) return String(inbound.id);
+  const protocol = String(inbound?.protocol ?? fallbackProtocol ?? "").trim();
+  const label = String(inbound?.tag ?? inbound?.label ?? inbound?.remark ?? inbound?.name ?? "").trim();
+  const port = inbound?.port !== undefined && inbound?.port !== null ? String(inbound.port).trim() : "";
+  return [protocol, label, port].filter(Boolean).join(":");
+}
+
 export function buildClient(panel) {
   const baseUrl = normalizeBaseUrl(panel?.url);
   const username = readCredential(panel, ["username"]);
@@ -58,11 +66,24 @@ export async function authenticate(client) {
 
 function normalizeInbound(inbound) {
   return {
-    id: String(inbound?.id ?? inbound?.uuid ?? inbound?.name ?? ""),
-    label: String(inbound?.label ?? inbound?.remark ?? inbound?.name ?? inbound?.id ?? ""),
-    protocol: String(inbound?.protocol ?? inbound?.streamSettings?.network ?? ""),
+    id: stableInboundId(inbound),
+    label: String(inbound?.tag ?? inbound?.label ?? inbound?.remark ?? inbound?.name ?? inbound?.id ?? ""),
+    protocol: String(inbound?.protocol ?? ""),
+    network: String(inbound?.network ?? inbound?.streamSettings?.network ?? ""),
+    tls: String(inbound?.tls ?? inbound?.streamSettings?.security ?? ""),
+    port: inbound?.port ?? null,
     enabled: inbound?.enabled !== false
   };
+}
+
+function flattenInboundPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.obj)) return payload.obj;
+    if (Array.isArray(payload.data)) return payload.data;
+    return Object.values(payload).flatMap((group) => (Array.isArray(group) ? group : []));
+  }
+  return [];
 }
 
 export async function listInbounds(panel) {
@@ -73,8 +94,7 @@ export async function listInbounds(panel) {
   });
   if (!response.ok) fail(response.status || 502, `Marzban inbounds request failed with HTTP ${response.status}`);
   const payload = await response.json();
-  const items = Array.isArray(payload) ? payload : Array.isArray(payload?.obj) ? payload.obj : Array.isArray(payload?.data) ? payload.data : [];
-  return items.map(normalizeInbound);
+  return flattenInboundPayload(payload).map((inbound) => normalizeInbound(inbound));
 }
 
 export const marzbanAdapter = {
