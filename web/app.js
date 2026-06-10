@@ -693,7 +693,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
   state.createUserInboundId = "";
   refreshUserInboundField();
   try {
-    const rows = await api(`/api/superadmin/panels/${panelId}/inbounds`);
+    const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
     state.createUserInbounds = rows;
     state.createUserInboundIds = normalMarzbanInboundIds(rows);
     state.createUserInboundId = state.createUserInboundIds[0] || "";

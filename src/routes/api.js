@@ -360,6 +360,21 @@ export async function handleApi(req, res, route) {
     return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
   }
 
+  const scopedInbounds = match(pathname, "/api/admin/panels/:id/inbounds");
+  if (scopedInbounds && method === "GET") {
+    const actorScoped = requireAuth(req);
+    const panel = scopedPanels(actorScoped).find((item) => item.id === scopedInbounds.id);
+    if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    if (panel.type !== "marzban") {
+      return sendJson(res, 501, { ok: false, error: "Real inbounds are only implemented for Marzban panels" });
+    }
+    const adapter = adapterFor(panel.type);
+    if (!adapter || typeof adapter.listInbounds !== "function") {
+      return sendJson(res, 501, { ok: false, error: "Real inbounds are not available for this panel type yet" });
+    }
+    return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
+  }
+
   const syncPanel = match(pathname, "/api/panels/:id/sync");
   if (syncPanel && method === "POST") {
     const panel = scopedPanels(actor).find((item) => item.id === syncPanel.id);
