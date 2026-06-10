@@ -1457,13 +1457,85 @@ test("panel credentials are stripped from api responses", async () => {
 });
 
 test("marzban adapter methods are explicit not-implemented skeletons", async () => {
-  for (const method of ["syncUserTraffic", "sync"]) {
+  for (const method of ["sync"]) {
     await assert.rejects(marzbanAdapter[method](), (error) => {
       assert.equal(error.status, 501);
       assert.match(error.message, /Marzban .* is not implemented yet/);
       return true;
     });
   }
+});
+
+test("marzban syncUserTraffic uses the remote user lookup endpoint", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ used_traffic: 222 })
+      }
+    ],
+    calls,
+    async () => {
+      const result = await marzbanAdapter.syncUserTraffic(
+        {
+          url: "https://marzban.example.com/",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 10
+        }
+      );
+
+      assert.deepEqual(result, { username: "alice", usedBytes: 222 });
+    }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user/alice");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban syncUserTraffic falls back to local usedBytes when remote traffic is missing", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ username: "alice" })
+      }
+    ],
+    [],
+    async () => {
+      const result = await marzbanAdapter.syncUserTraffic(
+        {
+          url: "https://marzban.example.com",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 55
+        }
+      );
+
+      assert.deepEqual(result, { username: "alice", usedBytes: 55 });
+    }
+  );
 });
 
 test("marzban deleteUser sends the verified delete endpoint and treats 404 as success", async () => {

@@ -238,6 +238,10 @@ export async function getUser(panel, user) {
   };
 }
 
+export async function syncUserTraffic(panel, user) {
+  return getUser(panel, user);
+}
+
 export const marzbanAdapter = {
   type: "marzban",
   label: "Marzban",
@@ -266,8 +270,8 @@ export const marzbanAdapter = {
   async getUser(panel, user) {
     return getUser(panel, user);
   },
-  async syncUserTraffic() {
-    reject("syncUserTraffic");
+  async syncUserTraffic(panel, user) {
+    return syncUserTraffic(panel, user);
   },
   async sync() {
     reject("sync");
