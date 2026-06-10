@@ -272,6 +272,10 @@ small {
   min-width: 0;
 }
 
+.inbounds-table {
+  min-width: 860px;
+}
+
 .table th,
 .table td {
   border-bottom: 1px solid var(--line);
@@ -285,6 +289,26 @@ small {
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.inbounds-table th,
+.inbounds-table td {
+  vertical-align: top;
+}
+
+.inbound-label {
+  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.inbound-label strong {
+  display: block;
+  line-height: 1.3;
+}
+
+.inbound-status {
+  white-space: nowrap;
 }
 
 .badge,
@@ -438,6 +462,14 @@ small {
   overflow: auto;
 }
 
+.modal.wide-modal {
+  width: min(980px, 100%);
+}
+
+.modal.wide-modal .table-wrap {
+  max-width: 100%;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.86rem;
@@ -484,4 +516,17 @@ small {
   .split {
     grid-template-columns: 1fr;
   }
+
+  .modal.wide-modal {
+    width: min(100%, 100%);
+  }
+
+  .inbound-label {
+    max-width: 200px;
+  }
+}
+
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

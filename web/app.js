@@ -257,7 +257,9 @@ function panels() {
                 <td>${dateShort(p.lastSyncAt)}</td>
                 <td class="row-actions">
                   <button class="ghost" onclick="window.Aegis.loadPanelInbounds('${p.id}')">View inbounds</button>
-                  <button class="ghost" onclick="window.Aegis.syncPanel('${p.id}')">Sync</button>
+                  ${p.type === "marzban"
+                    ? `<button class="ghost" disabled title="Marzban sync is not ready yet">Sync not ready</button>`
+                    : `<button class="ghost" onclick="window.Aegis.syncPanel('${p.id}')">Sync</button>`}
                   <button class="danger-btn" onclick="window.Aegis.deletePanel('${p.id}')">Delete</button>
                 </td>
               </tr>
@@ -394,7 +396,8 @@ function modal(title, body) {
 }
 
 function modalPanel(title, body) {
-  return `<section class="modal card"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
+  const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
+  return `<section class="modal card${wide}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
 function setModal(title, body) {
@@ -537,19 +540,19 @@ async function loadPanelInbounds(id) {
     const rows = await api(`/api/superadmin/panels/${id}/inbounds`);
     setModal("Panel inbounds", `
       <div class="table-wrap">
-        <table class="table compact-table">
+        <table class="table compact-table inbounds-table">
           <thead>
             <tr><th>Label</th><th>Protocol</th><th>Network</th><th>TLS</th><th>Port</th><th>Status</th></tr>
           </thead>
           <tbody>
             ${rows.map((inbound) => `
               <tr>
-                <td><strong>${esc(inbound.label || "-")}</strong><small class="block mono">${esc(inbound.id || "")}</small></td>
+                <td class="inbound-label"><strong>${esc(inbound.label || "-")}</strong><small class="block mono">${esc(inbound.id || "")}</small></td>
                 <td>${esc(inbound.protocol || "-")}</td>
                 <td>${esc(inbound.network || "-")}</td>
                 <td>${esc(inbound.tls || "-")}</td>
                 <td>${inbound.port ?? "-"}</td>
-                <td><span class="badge ${inbound.enabled ? "green" : "red"}">${inbound.enabled ? "Enabled" : "Disabled"}</span></td>
+                <td><span class="badge inbound-status ${inbound.enabled ? "green" : "red"}">${inbound.enabled ? "Enabled" : "Disabled"}</span></td>
               </tr>
             `).join("") || emptyRow(6, "No inbounds returned by this panel.")}
           </tbody>
