@@ -110,6 +110,21 @@ function finiteQuotaBytes(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function parseNonNegativeFiniteBytes(value, key, { allowMissing = false, defaultValue = 0 } = {}) {
+  if (value === undefined) {
+    if (allowMissing) return defaultValue;
+    const error = new Error(`Missing required field: ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  return value;
+}
+
 function dashboard(actor) {
   const panels = scopedPanels(actor);
   const users = scopedUsers(actor);
@@ -317,7 +332,12 @@ export async function handleApi(req, res, route) {
     const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
-    const requestedLimitBytes = Number(body.limitBytes || 0);
+    const requestedLimitBytes = Object.prototype.hasOwnProperty.call(body, "limitBytes")
+      ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes")
+      : 0;
+    const requestedUsedBytes = Object.prototype.hasOwnProperty.call(body, "usedBytes")
+      ? parseNonNegativeFiniteBytes(body.usedBytes, "usedBytes")
+      : 0;
     const owner = store.find("admins", actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id);
     if (!owner) return sendJson(res, 400, { ok: false, error: "Valid ownerAdminId is required" });
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
@@ -339,7 +359,8 @@ export async function handleApi(req, res, route) {
       flow: body.flow || "",
       active: body.active !== false,
       limitBytes: requestedLimitBytes,
-      usedBytes: Number(body.usedBytes || 0),
+      usedBytes: requestedUsedBytes,
+      reservedBytes: requestedLimitBytes,
       expiresAt: body.expiresAt || null
     });
     store.audit(actor, "user.create", user.id, { username: user.username });
@@ -350,7 +371,14 @@ export async function handleApi(req, res, route) {
   if (userId && method === "PUT") {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
-    const updated = store.update("users", user.id, await readJson(req));
+    const body = await readJson(req);
+    const blockedField = ["ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"].find((field) =>
+      Object.prototype.hasOwnProperty.call(body, field)
+    );
+    if (blockedField) {
+      return sendJson(res, 400, { ok: false, error: `Cannot update ${blockedField}` });
+    }
+    const updated = store.update("users", user.id, body);
     store.audit(actor, "user.update", user.id);
     return sendJson(res, 200, { ok: true, data: updated });
   }
@@ -360,7 +388,10 @@ export async function handleApi(req, res, route) {
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const owner = store.find("admins", user.ownerAdminId);
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
-    const returned = Math.max(Number(user.limitBytes || 0) - Number(user.usedBytes || 0), 0);
+    const limitBytes = finiteQuotaBytes(user.limitBytes) ?? 0;
+    const usedBytes = finiteQuotaBytes(user.usedBytes) ?? 0;
+    const reservedBytes = finiteQuotaBytes(user.reservedBytes) ?? limitBytes;
+    const returned = Math.min(Math.max(limitBytes - usedBytes, 0), reservedBytes);
     if (owner?.deleteReturnTraffic && ownerRemainingBytes !== null && returned > 0) {
       store.update("admins", owner.id, {
         trafficRemainingBytes: ownerRemainingBytes + returned

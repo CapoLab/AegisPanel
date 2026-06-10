@@ -257,6 +257,204 @@ test("existing valid admin user flow still passes", async () => {
   );
 });
 
+test("invalid quota values are rejected on user create", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+
+      const negativeLimit = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "neg-limit",
+          panelId: panel.id,
+          limitBytes: -1
+        }
+      });
+      assert.equal(negativeLimit.statusCode, 400);
+      assert.match(negativeLimit.json.error, /Invalid limitBytes/i);
+
+      const nonNumericLimit = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "string-limit",
+          panelId: panel.id,
+          limitBytes: "10"
+        }
+      });
+      assert.equal(nonNumericLimit.statusCode, 400);
+      assert.match(nonNumericLimit.json.error, /Invalid limitBytes/i);
+
+      const negativeUsed = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "neg-used",
+          panelId: panel.id,
+          usedBytes: -5
+        }
+      });
+      assert.equal(negativeUsed.statusCode, 400);
+      assert.match(negativeUsed.json.error, /Invalid usedBytes/i);
+    }
+  );
+});
+
+test("put cannot change quota accounting fields", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "locked-user",
+          panelId: panel.id,
+          limitBytes: 200,
+          usedBytes: 50
+        }
+      });
+
+      for (const field of ["ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"]) {
+        const res = await callApiWithOutcome(handleApi, {
+          method: "PUT",
+          pathname: `/api/admin/users/${user.id}`,
+          session: login.session,
+          body: {
+            [field]: field === "ownerAdminId" ? "adm_other" : 999
+          }
+        });
+        assert.equal(res.statusCode, 400);
+        assert.match(res.json.error, new RegExp(`Cannot update ${field}`));
+      }
+    }
+  );
+});
+
+test("delete returns at most the reserved bytes", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "cap-admin",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "tampered-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 500,
+          usedBytes: 100
+        }
+      });
+      store.update("users", user.id, {
+        limitBytes: 1200,
+        usedBytes: 50,
+        reservedBytes: 200
+      });
+
+      const before = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const beforeOwner = before.find((admin) => admin.username === "cap-admin");
+      const deleted = await callApi(handleApi, {
+        method: "DELETE",
+        pathname: `/api/admin/users/${user.id}`,
+        session: login.session
+      });
+      assert.equal(deleted.ok, true);
+      const after = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const afterOwner = after.find((admin) => admin.username === "cap-admin");
+      assert.equal(afterOwner.trafficRemainingBytes - beforeOwner.trafficRemainingBytes, 200);
+    }
+  );
+});
+
 test("creating a user subtracts traffic from the owner", async () => {
   await withTempEnv(
     {
@@ -340,11 +538,6 @@ test("creating a user fails when the owner has insufficient traffic", async () =
           password: "admin-pass",
           trafficLimitBytes: 100
         }
-      });
-      const ownerLogin = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/auth/login",
-        body: { username: "small-quota-admin", password: "admin-pass" }
       });
       const panel = await callApi(handleApi, {
         method: "POST",
