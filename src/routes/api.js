@@ -12,6 +12,11 @@ function publicAdmin(admin) {
   return safe;
 }
 
+function publicPanel(panel) {
+  const { username, secret, apiKey, token, credentials, password, ...safe } = panel;
+  return safe;
+}
+
 function requireAuth(req, role) {
   const session = req.headers["x-aegis-session"] || "";
   const payload = verifySession(session, config.sessionSecret);
@@ -60,7 +65,7 @@ function dashboard(actor) {
       usedBytes,
       limitBytes
     },
-    panels,
+    panels: panels.map(publicPanel),
     recentEvents: store.list("trafficEvents").slice(0, 25),
     news: store.list("news").slice(0, 5),
     distribution: store.state.distribution
@@ -166,7 +171,7 @@ export async function handleApi(req, res, route) {
 
   if (method === "GET" && pathname === "/api/superadmin/panels") {
     requireAuth(req, "superadmin");
-    return sendJson(res, 200, { ok: true, data: store.list("panels") });
+    return sendJson(res, 200, { ok: true, data: store.list("panels").map(publicPanel) });
   }
 
   if (method === "POST" && pathname === "/api/superadmin/panels") {
@@ -186,7 +191,7 @@ export async function handleApi(req, res, route) {
       lastSyncAt: null
     });
     store.audit(superadmin, "panel.create", panel.id, { name: panel.name, type: panel.type });
-    return sendJson(res, 201, { ok: true, data: panel });
+    return sendJson(res, 201, { ok: true, data: publicPanel(panel) });
   }
 
   const panelId = match(pathname, "/api/superadmin/panels/:id");
@@ -195,7 +200,7 @@ export async function handleApi(req, res, route) {
     const panel = store.update("panels", panelId.id, await readJson(req));
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
     store.audit(superadmin, "panel.update", panel.id);
-    return sendJson(res, 200, { ok: true, data: panel });
+    return sendJson(res, 200, { ok: true, data: publicPanel(panel) });
   }
 
   if (panelId && method === "DELETE") {
@@ -285,7 +290,13 @@ export async function handleApi(req, res, route) {
 
   if (method === "GET" && pathname === "/api/superadmin/backup") {
     requireAuth(req, "superadmin");
-    return sendJson(res, 200, { ok: true, data: store.state });
+    return sendJson(res, 200, {
+      ok: true,
+      data: {
+        ...store.state,
+        panels: store.list("panels").map(publicPanel)
+      }
+    });
   }
 
   if (method === "GET" && pathname === "/api/superadmin/logs") {

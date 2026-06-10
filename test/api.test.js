@@ -111,6 +111,95 @@ test("configured credentials still allow login through the auth flow", async () 
   );
 });
 
+test("panel credentials are stripped from api responses", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const { handleApi } = await importFresh("../src/routes/api.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const session = login.session;
+
+      const created = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session,
+        body: {
+          name: "Panel One",
+          type: "marzban",
+          url: "https://panel.example.com",
+          username: "panel-user",
+          secret: "panel-secret",
+          apiKey: "panel-key",
+          token: "panel-token",
+          credentials: "panel-creds"
+        }
+      });
+
+      assert.equal(created.username, undefined);
+      assert.equal(created.secret, undefined);
+      assert.equal(created.apiKey, undefined);
+      assert.equal(created.token, undefined);
+      assert.equal(created.credentials, undefined);
+
+      const updated = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${created.id}`,
+        session,
+        body: {
+          name: "Panel One Updated",
+          type: "marzban",
+          url: "https://panel.example.com",
+          username: "updated-user",
+          secret: "updated-secret",
+          apiKey: "updated-key",
+          token: "updated-token"
+        }
+      });
+
+      assert.equal(updated.username, undefined);
+      assert.equal(updated.secret, undefined);
+      assert.equal(updated.apiKey, undefined);
+      assert.equal(updated.token, undefined);
+
+      const dashboard = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/dashboard",
+        session
+      });
+      assert.equal(dashboard.panels[0].username, undefined);
+      assert.equal(dashboard.panels[0].secret, undefined);
+      assert.equal(dashboard.panels[0].apiKey, undefined);
+
+      const panelList = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/panels",
+        session
+      });
+      assert.equal(panelList[0].username, undefined);
+      assert.equal(panelList[0].secret, undefined);
+      assert.equal(panelList[0].apiKey, undefined);
+
+      const backup = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/backup",
+        session
+      });
+      assert.equal(backup.panels[0].username, undefined);
+      assert.equal(backup.panels[0].secret, undefined);
+      assert.equal(backup.panels[0].apiKey, undefined);
+    }
+  );
+});
+
 function createMockResponse() {
   return {
     statusCode: 200,
@@ -122,6 +211,32 @@ function createMockResponse() {
     },
     end(body) {
       this.json = JSON.parse(body);
+    }
+  };
+}
+
+async function callApi(handleApi, { method, pathname, session, body }) {
+  const req = createMockRequest(method, pathname, session, body);
+  const res = createMockResponse();
+  const route = { method, pathname, search: new URLSearchParams() };
+  await handleApi(req, res, route);
+  assert.equal(res.statusCode >= 200 && res.statusCode < 300, true);
+  assert.equal(res.json.ok, true);
+  return res.json.data ?? res.json;
+}
+
+function createMockRequest(method, pathname, session, body) {
+  const payload = body ? JSON.stringify(body) : "";
+  return {
+    method,
+    url: pathname,
+    headers: {
+      "content-type": "application/json",
+      ...(session ? { "x-aegis-session": session } : {})
+    },
+    body: payload,
+    [Symbol.asyncIterator]: async function* () {
+      if (payload) yield Buffer.from(payload);
     }
   };
 }
