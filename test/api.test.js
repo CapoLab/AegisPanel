@@ -942,6 +942,10 @@ test("marzban authenticate and listInbounds use the verified endpoint pattern", 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers["content-type"], "application/x-www-form-urlencoded");
+  assert.equal(calls[0].options.body instanceof URLSearchParams, true);
+  assert.equal(calls[0].options.body.get("username"), "admin");
+  assert.equal(calls[0].options.body.get("password"), "secret");
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
   assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
 });

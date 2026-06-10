@@ -50,10 +50,14 @@ export function buildClient(panel) {
 }
 
 export async function authenticate(client) {
+  const body = new URLSearchParams({
+    username: client.username,
+    password: client.password
+  });
   const response = await fetch(client.authUrl, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: client.username, password: client.password })
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
   });
   if (!response.ok) fail(response.status || 502, `Marzban token request failed with HTTP ${response.status}`);
   const payload = await response.json();
