@@ -256,6 +256,7 @@ function panels() {
                 <td><span class="badge ${p.active ? "green" : "red"}">${p.active ? "Active" : "Off"}</span></td>
                 <td>${dateShort(p.lastSyncAt)}</td>
                 <td class="row-actions">
+                  <button class="ghost" onclick="window.Aegis.loadPanelInbounds('${p.id}')">View inbounds</button>
                   <button class="ghost" onclick="window.Aegis.syncPanel('${p.id}')">Sync</button>
                   <button class="danger-btn" onclick="window.Aegis.deletePanel('${p.id}')">Delete</button>
                 </td>
@@ -388,12 +389,28 @@ function modal(title, body) {
   document.querySelector(".modal-root")?.remove();
   const root = document.createElement("div");
   root.className = "modal-root";
-  root.innerHTML = `<div class="modal-backdrop" onclick="window.Aegis.closeModal()"></div><section class="modal card"><div class="card-head"><h3>${title}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
+  root.innerHTML = `<div class="modal-backdrop" onclick="window.Aegis.closeModal()"></div>${modalPanel(title, body)}`;
   document.body.append(root);
+}
+
+function modalPanel(title, body) {
+  return `<section class="modal card"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
+}
+
+function setModal(title, body) {
+  const root = document.querySelector(".modal-root");
+  if (!root) return modal(title, body);
+  root.querySelector(".modal")?.replaceWith(htmlToElement(modalPanel(title, body)));
 }
 
 function closeModal() {
   document.querySelector(".modal-root")?.remove();
+}
+
+function htmlToElement(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html.trim();
+  return template.content.firstElementChild;
 }
 
 function showPanelForm() {
@@ -514,6 +531,36 @@ async function syncPanel(id) {
   }, state.notice || "Panel synced");
 }
 
+async function loadPanelInbounds(id) {
+  modal("Panel inbounds", `<p class="muted">Loading inbounds...</p>`);
+  try {
+    const rows = await api(`/api/superadmin/panels/${id}/inbounds`);
+    setModal("Panel inbounds", `
+      <div class="table-wrap">
+        <table class="table compact-table">
+          <thead>
+            <tr><th>Label</th><th>Protocol</th><th>Network</th><th>TLS</th><th>Port</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${rows.map((inbound) => `
+              <tr>
+                <td><strong>${esc(inbound.label || "-")}</strong><small class="block mono">${esc(inbound.id || "")}</small></td>
+                <td>${esc(inbound.protocol || "-")}</td>
+                <td>${esc(inbound.network || "-")}</td>
+                <td>${esc(inbound.tls || "-")}</td>
+                <td>${inbound.port ?? "-"}</td>
+                <td><span class="badge ${inbound.enabled ? "green" : "red"}">${inbound.enabled ? "Enabled" : "Disabled"}</span></td>
+              </tr>
+            `).join("") || emptyRow(6, "No inbounds returned by this panel.")}
+          </tbody>
+        </table>
+      </div>
+    `);
+  } catch (error) {
+    setModal("Panel inbounds", `<p class="alert danger">${esc(error.message)}</p>`);
+  }
+}
+
 async function deletePanel(id) {
   if (!confirm("Delete this panel?")) return;
   await runAction(() => api(`/api/superadmin/panels/${id}`, { method: "DELETE" }), "Panel deleted");
@@ -568,6 +615,7 @@ window.Aegis = {
   createUser,
   createNews,
   syncPanel,
+  loadPanelInbounds,
   deletePanel,
   deleteAdmin,
   deleteUser,
