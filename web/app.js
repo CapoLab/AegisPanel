@@ -17,8 +17,7 @@ const state = {
   createUserInboundsError: "",
   createUserInboundId: "",
   createUserInboundIds: [],
-  createUserExpiryMode: "no-expiry",
-  createUserCustomExpiresAt: "",
+  createUserExpiryDate: "",
   error: "",
   notice: ""
 };
@@ -465,8 +464,7 @@ function showUserForm() {
   state.createUserInboundsError = "";
   state.createUserInboundId = "";
   state.createUserInboundIds = [];
-  state.createUserExpiryMode = "no-expiry";
-  state.createUserCustomExpiresAt = "";
+  state.createUserExpiryDate = "";
   modal("New user", createUserModalBody());
   if (state.createUserPanelId) {
     void loadUserInbounds(state.createUserPanelId, { silent: true });
@@ -576,8 +574,7 @@ function groupMarzbanInbounds(inbounds) {
       grouped[key] = [];
       order.push({ key, label: protocol });
     }
-    const isDefault = !/dummy|metrics/i.test(`${inbound.label || ""} ${inbound.id || ""}`);
-    grouped[key].push({ ...inbound, isDefault });
+    grouped[key].push({ ...inbound });
   }
   return order.reduce((acc, item) => {
     acc[item.label] = grouped[item.key];
@@ -590,55 +587,30 @@ function normalMarzbanInboundIds(inbounds) {
 }
 
 function createUserExpiryField() {
-  const mode = state.createUserExpiryMode || "no-expiry";
-  const customValue = state.createUserCustomExpiresAt || "";
-  const presetLabels = {
-    "no-expiry": "No expiry",
-    "1d": "1 day",
-    "3d": "3 days",
-    "7d": "7 days",
-    "30d": "30 days",
-    "90d": "90 days",
-    custom: "Custom date"
-  };
+  const value = state.createUserExpiryDate || "";
   return `
     <div class="expiry-picker">
-      <label>Expiry
-        <select name="expiryMode" onchange="window.Aegis.setCreateUserExpiryMode(this.value)">
-          ${Object.entries(presetLabels).map(([value, label]) => `<option value="${value}"${value === mode ? " selected" : ""}>${esc(label)}</option>`).join("")}
-        </select>
-      </label>
-      ${mode === "custom" ? `
-        <label>Custom date<input name="expiresAtCustom" type="datetime-local" value="${esc(customValue)}" onchange="window.Aegis.setCreateUserCustomExpiry(this.value)" /></label>
-      ` : ""}
+      <label>Expiry Date</label>
+      <div class="expiry-row">
+        <input name="expiresAtDate" type="date" value="${esc(value)}" onchange="window.Aegis.setCreateUserExpiryDate(this.value)" />
+        ${value ? `<button type="button" class="ghost expiry-clear" onclick="window.Aegis.clearCreateUserExpiry()">×</button>` : ""}
+      </div>
       <p class="muted expiry-preview">${esc(formatExpiryPreview())}</p>
     </div>
   `;
 }
 
 function formatExpiryPreview() {
-  const mode = state.createUserExpiryMode || "no-expiry";
-  const daysMap = {
-    "1d": 1,
-    "3d": 3,
-    "7d": 7,
-    "30d": 30,
-    "90d": 90
-  };
-  if (mode === "no-expiry") return "No expiry";
-  if (mode === "custom") {
-    if (!state.createUserCustomExpiresAt) return "Select a custom date";
-    return `Expires at ${formatLocalDateTime(state.createUserCustomExpiresAt)}`;
-  }
-  const days = daysMap[mode] || 0;
-  return `Expires in ${days} day${days === 1 ? "" : "s"}`;
+  if (!state.createUserExpiryDate) return "No expiry";
+  const formatted = formatLocalDate(state.createUserExpiryDate);
+  return formatted ? `Expires at ${formatted} 23:59` : "No expiry";
 }
 
-function formatLocalDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+function formatLocalDate(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function pad2(value) {
@@ -663,16 +635,13 @@ function clearMarzbanInbounds() {
   refreshUserInboundField();
 }
 
-function setCreateUserExpiryMode(mode) {
-  state.createUserExpiryMode = mode;
-  if (mode !== "custom") {
-    state.createUserCustomExpiresAt = "";
-  }
+function setCreateUserExpiryDate(value) {
+  state.createUserExpiryDate = value;
   refreshUserExpiryField();
 }
 
-function setCreateUserCustomExpiry(value) {
-  state.createUserCustomExpiresAt = value;
+function clearCreateUserExpiry() {
+  state.createUserExpiryDate = "";
   refreshUserExpiryField();
 }
 
@@ -805,29 +774,13 @@ async function createUser(event) {
 }
 
 function resolveCreateUserExpiry(form) {
-  const mode = state.createUserExpiryMode || "no-expiry";
-  if (mode === "no-expiry") return null;
-  if (mode === "custom") {
-    const customValue = state.createUserCustomExpiresAt || form.get("expiresAtCustom");
-    if (!customValue) {
-      throw new Error("Please select a custom expiry date.");
-    }
-    const date = new Date(customValue);
-    if (Number.isNaN(date.getTime())) {
-      throw new Error("Please select a valid custom expiry date.");
-    }
-    return date.toISOString();
+  const value = state.createUserExpiryDate || form.get("expiresAtDate") || "";
+  if (!value) return null;
+  const date = new Date(`${value}T23:59:59`);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Please select a valid expiry date.");
   }
-  const daysMap = {
-    "1d": 1,
-    "3d": 3,
-    "7d": 7,
-    "30d": 30,
-    "90d": 90
-  };
-  const days = daysMap[mode];
-  if (!days) return null;
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  return date.toISOString();
 }
 
 async function createNews(event) {
@@ -958,8 +911,8 @@ window.Aegis = {
   toggleMarzbanInboundSelection,
   selectAllMarzbanInbounds,
   clearMarzbanInbounds,
-  setCreateUserExpiryMode,
-  setCreateUserCustomExpiry,
+  setCreateUserExpiryDate,
+  clearCreateUserExpiry,
   createNews,
   syncPanel,
   syncUserTraffic,

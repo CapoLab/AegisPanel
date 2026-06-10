@@ -437,15 +437,30 @@ small {
   gap: 10px;
 }
 
-.expiry-picker > label,
-.expiry-picker > div > label {
-  display: grid;
-  gap: 6px;
+.expiry-picker > label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
-.expiry-picker select,
-.expiry-picker input {
-  width: 100%;
+.expiry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.expiry-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.expiry-clear {
+  flex: 0 0 auto;
+  min-width: 42px;
+  padding-inline: 12px;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .expiry-preview {
