@@ -566,7 +566,8 @@ function modal(title, body) {
 
 function modalPanel(title, body) {
   const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
-  return `<section class="modal card${wide}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
+  const compact = String(title).toLowerCase().includes("edit vpn account") ? " edit-modal" : "";
+  return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
 function setModal(title, body) {
@@ -1101,12 +1102,12 @@ function editUserModalBody() {
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
   const isMarzban = panel?.type === "marzban";
   return `
-    <form class="form create-user-form" onsubmit="window.Aegis.saveEditUser(event)">
+    <form class="form edit-user-form" onsubmit="window.Aegis.saveEditUser(event)">
       <label>Username<input name="username" readonly value="${esc(state.editUserUsername)}" /></label>
       <label>Panel<input readonly value="${esc(panelName(state.editUserPanelId))}" /></label>
       <div id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label>`}</div>
       <label>Flow<input name="flow" value="${esc(state.editUserFlow)}" placeholder="xtls-rprx-vision, optional" /></label>
-      <label>Active<input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} /></label>
+      <label class="inline-check">Active<input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} /></label>
       <div id="edit-user-expiry-field">${editUserExpiryField()}</div>
       <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
       <button class="primary" type="submit">Save VPN account</button>
