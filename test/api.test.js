@@ -1003,6 +1003,144 @@ test("marzban listInbounds flattens grouped protocol responses", async () => {
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
 });
 
+test("superadmin can fetch normalized marzban inbounds through the api", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "marzban-admin",
+          secret: "marzban-pass"
+        }
+      });
+      await withMockFetch([
+        {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: "marzban-token" })
+        },
+        {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            vless: [
+              { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
+            ]
+          })
+        }
+      ], calls, async () => {
+        const res = await callApi(handleApi, {
+          method: "GET",
+          pathname: `/api/superadmin/panels/${panel.id}/inbounds`,
+          session: login.session
+        });
+        assert.deepEqual(res, [
+          {
+            id: "vless:WS TLS:10002",
+            label: "WS TLS",
+            protocol: "vless",
+            network: "ws",
+            tls: "tls",
+            port: 10002,
+            enabled: true
+          }
+        ]);
+        for (const inbound of res) {
+          assert.equal("username" in inbound, false);
+          assert.equal("password" in inbound, false);
+          assert.equal("secret" in inbound, false);
+          assert.equal("apiKey" in inbound, false);
+          assert.equal("token" in inbound, false);
+          assert.equal("credentials" in inbound, false);
+        }
+      });
+    }
+  );
+
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+});
+
+test("missing panel returns 404 for inbounds", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/panels/pan_missing/inbounds",
+        session: login.session
+      });
+      assert.equal(res.statusCode, 404);
+      assert.match(res.json.error, /Panel not found/i);
+    }
+  );
+});
+
+test("non-marzban panels fail clearly for real inbounds", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Tx Panel",
+          type: "tx-ui",
+          url: "https://tx.example.com"
+        }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "GET",
+        pathname: `/api/superadmin/panels/${panel.id}/inbounds`,
+        session: login.session
+      });
+      assert.equal(res.statusCode, 501);
+      assert.match(res.json.error, /Real inbounds are only implemented for Marzban panels/i);
+    }
+  );
+});
+
 test("marzban token and inbounds failures fail clearly", async () => {
   await withMockFetch([
     {

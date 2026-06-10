@@ -306,7 +306,13 @@ export async function handleApi(req, res, route) {
     requireAuth(req, "superadmin");
     const panel = store.find("panels", inbounds.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    if (panel.type !== "marzban") {
+      return sendJson(res, 501, { ok: false, error: "Real inbounds are only implemented for Marzban panels" });
+    }
     const adapter = adapterFor(panel.type);
+    if (!adapter || typeof adapter.listInbounds !== "function") {
+      return sendJson(res, 501, { ok: false, error: "Real inbounds are not available for this panel type yet" });
+    }
     return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
   }
 
