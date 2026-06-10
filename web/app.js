@@ -11,6 +11,11 @@ const state = {
   news: [],
   system: null,
   syncingUserId: null,
+  createUserPanelId: "",
+  createUserInbounds: [],
+  createUserInboundsLoading: false,
+  createUserInboundsError: "",
+  createUserInboundId: "",
   error: "",
   notice: ""
 };
@@ -451,17 +456,110 @@ function showAdminForm() {
 }
 
 function showUserForm() {
-  modal("New user", `
+  state.createUserPanelId = state.data?.panels?.[0]?.id || "";
+  state.createUserInbounds = [];
+  state.createUserInboundsLoading = false;
+  state.createUserInboundsError = "";
+  state.createUserInboundId = "";
+  modal("New user", createUserModalBody());
+  if (state.createUserPanelId) {
+    void loadUserInbounds(state.createUserPanelId, { silent: true });
+  }
+}
+
+function createUserModalBody() {
+  return `
     <form class="form" onsubmit="window.Aegis.createUser(event)">
       <label>Username<input name="username" required placeholder="client-name" /></label>
-      <label>Panel<select name="panelId" required>${(state.data?.panels || []).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
-      <label>Inbound<input name="inboundId" placeholder="default" /></label>
+      <label>Panel<select name="panelId" required onchange="window.Aegis.loadUserInbounds(this.value)">${(state.data?.panels || []).map((p) => `<option value="${p.id}"${p.id === state.createUserPanelId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+      <div id="user-inbound-field">${createUserInboundField()}</div>
       <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
       <label>Traffic limit (GB)<input name="limitGb" type="number" min="0" step="1" value="25" /></label>
       <label>Expiry<input name="expiresAt" type="datetime-local" /></label>
       <button class="primary" type="submit">Create user</button>
     </form>
-  `);
+  `;
+}
+
+function createUserInboundField() {
+  const panel = state.data?.panels?.find((item) => item.id === state.createUserPanelId);
+  const isMarzban = panel?.type === "marzban";
+  if (!isMarzban) {
+    return `<label>Inbound<input name="inboundId" placeholder="default" value="${esc(state.createUserInboundId || "")}" /></label>`;
+  }
+  if (state.createUserInboundsLoading) {
+    return `<p class="muted">Loading Marzban inbounds...</p>`;
+  }
+  if (state.createUserInboundsError) {
+    return `<p class="alert danger">${esc(state.createUserInboundsError)}</p>`;
+  }
+  if (!state.createUserInbounds.length) {
+    return `<p class="alert danger">This Marzban panel has no inbounds yet. Load inbounds before creating a user.</p>`;
+  }
+  const selectedId = state.createUserInboundId || state.createUserInbounds[0].id;
+  return `
+    <label>Inbound
+      <select name="inboundId" required>
+        ${state.createUserInbounds.map((inbound) => `
+          <option value="${esc(inbound.id)}"${inbound.id === selectedId ? " selected" : ""}>${esc(formatInboundOption(inbound))}</option>
+        `).join("")}
+      </select>
+    </label>
+    <p class="muted">Loaded from the selected Marzban panel.</p>
+  `;
+}
+
+function refreshUserInboundField() {
+  const field = document.querySelector("#user-inbound-field");
+  if (!field) {
+    setModal("New user", createUserModalBody());
+    return;
+  }
+  field.innerHTML = createUserInboundField();
+}
+
+function formatInboundOption(inbound) {
+  const details = [inbound.protocol, inbound.network, inbound.tls, inbound.port].filter((part) => part !== "" && part !== null && part !== undefined).join("/");
+  return `${inbound.label || inbound.id} — ${details || inbound.id}`;
+}
+
+async function loadUserInbounds(panelId, { silent = false } = {}) {
+  state.createUserPanelId = panelId;
+  const panel = state.data?.panels?.find((item) => item.id === panelId);
+  if (!panel) {
+    state.createUserInbounds = [];
+    state.createUserInboundsError = "Select a panel to load inbounds.";
+    state.createUserInboundsLoading = false;
+    state.createUserInboundId = "";
+    refreshUserInboundField();
+    return;
+  }
+  if (panel.type !== "marzban") {
+    state.createUserInbounds = [];
+    state.createUserInboundsError = "";
+    state.createUserInboundsLoading = false;
+    state.createUserInboundId = "";
+    refreshUserInboundField();
+    return;
+  }
+  state.createUserInboundsLoading = true;
+  state.createUserInboundsError = "";
+  state.createUserInbounds = [];
+  state.createUserInboundId = "";
+  refreshUserInboundField();
+  try {
+    const rows = await api(`/api/superadmin/panels/${panelId}/inbounds`);
+    state.createUserInbounds = rows;
+    state.createUserInboundId = rows[0]?.id || "";
+    state.createUserInboundsError = "";
+  } catch (error) {
+    state.createUserInbounds = [];
+    state.createUserInboundId = "";
+    state.createUserInboundsError = error.message || "Failed to load Marzban inbounds";
+  } finally {
+    state.createUserInboundsLoading = false;
+    refreshUserInboundField();
+  }
 }
 
 function showNewsForm() {
@@ -507,17 +605,33 @@ async function createAdmin(event) {
 async function createUser(event) {
   event.preventDefault();
   const form = new FormData(event.target);
+  const panelId = form.get("panelId");
+  const panel = state.data?.panels?.find((item) => item.id === panelId);
+  const inboundId = form.get("inboundId") || "default";
   await runAction(async () => {
+    if (panel?.type === "marzban") {
+      if (state.createUserInboundsLoading) {
+        throw new Error("Please wait for Marzban inbounds to load.");
+      }
+      if (!state.createUserInbounds.length) {
+        throw new Error(state.createUserInboundsError || "Select a Marzban inbound before creating the user.");
+      }
+    }
+    const body = {
+      username: form.get("username"),
+      panelId,
+      flow: form.get("flow") || "",
+      limitBytes: gbToBytes(form.get("limitGb")),
+      expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
+      inboundId
+    };
+    if (panel?.type === "marzban") {
+      body.inboundIds = [inboundId];
+      body.inboundId = inboundId;
+    }
     await api("/api/admin/users", {
       method: "POST",
-      body: {
-        username: form.get("username"),
-        panelId: form.get("panelId"),
-        inboundId: form.get("inboundId") || "default",
-        flow: form.get("flow") || "",
-        limitBytes: gbToBytes(form.get("limitGb")),
-        expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null
-      }
+      body
     });
   }, "User created");
 }
@@ -646,6 +760,7 @@ window.Aegis = {
   createPanel,
   createAdmin,
   createUser,
+  loadUserInbounds,
   createNews,
   syncPanel,
   syncUserTraffic,
