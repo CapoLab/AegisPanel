@@ -885,13 +885,156 @@ test("panel credentials are stripped from api responses", async () => {
 });
 
 test("marzban adapter methods are explicit not-implemented skeletons", async () => {
-  for (const method of ["createUser", "deleteUser", "syncUserTraffic", "sync"]) {
+  for (const method of ["deleteUser", "syncUserTraffic", "sync"]) {
     await assert.rejects(marzbanAdapter[method](), (error) => {
       assert.equal(error.status, 501);
       assert.match(error.message, /Marzban .* is not implemented yet/);
       return true;
     });
   }
+});
+
+test("marzban createUser sends the verified create payload", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 42, username: "alice", status: "active" })
+      }
+    ],
+    calls,
+    async () => {
+      const result = await marzbanAdapter.createUser(
+        {
+          url: "https://marzban.example.com/",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          limitBytes: 1234,
+          expiresAt: "2030-01-02T03:04:05.000Z",
+          inboundIds: ["vless:WS TLS:10002", "vmess:VMESS TLS:10001"]
+        }
+      );
+
+      assert.equal(result.id, 42);
+      assert.equal(result.username, "alice");
+      assert.equal(result.status, "active");
+      assert.equal("access_token" in result, false);
+      assert.equal("password" in result, false);
+      assert.equal("secret" in result, false);
+
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+      assert.equal(calls[0].options.method, "POST");
+      assert.equal(calls[0].options.headers["content-type"], "application/x-www-form-urlencoded");
+      assert.equal(calls[0].options.body instanceof URLSearchParams, true);
+      assert.equal(calls[0].options.body.get("username"), "admin");
+      assert.equal(calls[0].options.body.get("password"), "secret");
+
+      assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+      assert.equal(calls[1].options.method, "POST");
+      assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+      assert.equal(calls[1].options.headers["content-type"], "application/json");
+      assert.deepEqual(JSON.parse(calls[1].options.body), {
+        username: "alice",
+        status: "active",
+        expire: 1893553445,
+        data_limit: 1234,
+        data_limit_reset_strategy: "no_reset",
+        inbounds: {
+          vless: ["WS TLS"],
+          vmess: ["VMESS TLS"]
+        },
+        proxies: {
+          vless: {},
+          vmess: {}
+        },
+        note: "",
+        on_hold_expire_duration: 0,
+        on_hold_timeout: null,
+        next_plan: {
+          data_limit: 0,
+          expire: 0,
+          add_remaining_traffic: false,
+          fire_on_either: true
+        }
+      });
+    }
+  );
+});
+
+test("marzban createUser fails clearly on remote errors", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: false,
+        status: 400,
+        json: async () => ({ detail: "bad request" })
+      }
+    ],
+    [],
+    async () => {
+      await assert.rejects(
+        marzbanAdapter.createUser(
+          {
+            url: "https://marzban.example.com",
+            username: "admin",
+            password: "secret"
+          },
+          {
+            username: "alice",
+            limitBytes: 100,
+            inboundId: "vless:WS TLS:10002"
+          }
+        ),
+        (error) => {
+          assert.equal(error.status, 400);
+          assert.match(error.message, /Marzban create user failed with HTTP 400/);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test("marzban createUser rejects empty selected inbounds before remote calls", async () => {
+  const calls = [];
+  await withMockFetch([], calls, async () => {
+    await assert.rejects(
+      marzbanAdapter.createUser(
+        {
+          url: "https://marzban.example.com",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          limitBytes: 100,
+          inboundIds: []
+        }
+      ),
+      (error) => {
+        assert.equal(error.status, 400);
+        assert.match(error.message, /At least one inbound must be selected for Marzban/i);
+        return true;
+      }
+    );
+  });
+  assert.equal(calls.length, 0);
 });
 
 test("marzban buildClient normalizes the base URL", async () => {
