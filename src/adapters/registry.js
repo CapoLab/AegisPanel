@@ -1,3 +1,5 @@
+import { marzbanAdapter } from "./marzban.js";
+
 const supported = new Map();
 
 function makeAdapter(type, label, capabilities) {
@@ -34,10 +36,11 @@ function makeAdapter(type, label, capabilities) {
 [
   ["three-x-ui", "3x-ui", ["api-key auth", "inbounds", "traffic-sync", "subscription-links"]],
   ["tx-ui", "Tx-ui", ["password-auth", "inbounds", "traffic-sync"]],
-  ["marzban", "Marzban", ["password-auth", "multi-inbound", "data-limit", "status-sync"]],
   ["guard", "Guard", ["api-key auth", "guard-users", "traffic-sync"]],
   ["s-ui", "S-ui", ["password-auth", "inbounds", "traffic-sync"]]
 ].forEach(([type, label, capabilities]) => supported.set(type, makeAdapter(type, label, capabilities)));
+
+supported.set("marzban", marzbanAdapter);
 
 export function adapterFor(type) {
   return supported.get(type);

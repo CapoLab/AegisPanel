@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { readJson } from "../src/utils/http.js";
 import { hashPassword, verifyPassword, signSession, verifySession } from "../src/utils/security.js";
 import { supportedPanels, adapterFor } from "../src/adapters/registry.js";
+import { marzbanAdapter } from "../src/adapters/marzban.js";
 
 async function withTempEnv(env, fn) {
   const keys = [
@@ -879,6 +880,53 @@ test("panel credentials are stripped from api responses", async () => {
       assert.equal(backup.panels[0].username, undefined);
       assert.equal(backup.panels[0].secret, undefined);
       assert.equal(backup.panels[0].apiKey, undefined);
+    }
+  );
+});
+
+test("marzban adapter methods are explicit not-implemented skeletons", async () => {
+  for (const method of ["buildClient", "authenticate", "listInbounds", "createUser", "deleteUser", "syncUserTraffic", "sync"]) {
+    await assert.rejects(marzbanAdapter[method](), (error) => {
+      assert.equal(error.status, 501);
+      assert.match(error.message, /Marzban .* is not implemented yet/);
+      return true;
+    });
+  }
+});
+
+test("marzban sync does not claim success before the adapter is implemented", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com"
+        }
+      });
+
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: `/api/panels/${panel.id}/sync`,
+        session: login.session
+      });
+      assert.equal(res.statusCode, 501);
+      assert.match(res.json.error, /Marzban sync is not implemented yet/);
     }
   );
 });
