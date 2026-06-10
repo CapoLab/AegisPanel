@@ -434,7 +434,7 @@ small {
 
 .expiry-picker {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .expiry-picker > label {
@@ -443,30 +443,124 @@ small {
   font-size: 0.9rem;
 }
 
-.expiry-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.expiry-shell {
+  position: relative;
   min-width: 0;
 }
 
-.expiry-row input {
-  flex: 1 1 auto;
+.expiry-display {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 36px 8px 12px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: none;
+  text-align: left;
   min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.expiry-display:hover {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: var(--surface-2);
+}
+
+.expiry-display:focus-visible {
+  border-color: rgba(59, 130, 246, 0.58);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+  outline: none;
+}
+
+.expiry-display-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.expiry-display-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.expiry-display-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.expiry-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color-scheme: dark;
 }
 
 .expiry-clear {
-  flex: 0 0 auto;
-  min-width: 42px;
-  padding-inline: 12px;
-  font-size: 1.05rem;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
   line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  opacity: 0.92;
+  z-index: 2;
 }
 
-.expiry-preview {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
+.expiry-clear:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.expiry-shell:not(.has-value) .expiry-clear {
+  display: none;
+}
+
+.expiry-shell:not(.has-value) .expiry-display-value {
+  display: none;
+}
+
+.expiry-shell:not(.has-value) .expiry-display {
+  justify-content: flex-end;
+  padding-right: 36px;
+}
+
+.expiry-shell.has-value .expiry-display {
+  padding-right: 38px;
+}
+
+.expiry-shell.has-value .expiry-display-icon {
+  display: none;
 }
 
 .form {
@@ -490,6 +584,135 @@ small {
   padding: 11px 12px;
   color: var(--text);
   background: var(--surface);
+}
+
+.create-user-form {
+  gap: 10px;
+}
+
+.create-user-form > label {
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.create-user-form input,
+.create-user-form select,
+.create-user-form textarea {
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: var(--surface-2);
+}
+
+.create-user-form input:hover,
+.create-user-form select:hover,
+.create-user-form textarea:hover {
+  border-color: rgba(148, 163, 184, 0.26);
+}
+
+.create-user-form input:focus,
+.create-user-form select:focus,
+.create-user-form textarea:focus {
+  border-color: rgba(59, 130, 246, 0.52);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  outline: none;
+}
+
+.create-user-form .inbound-picker {
+  gap: 8px;
+}
+
+.create-user-form .compact-head {
+  margin-bottom: 6px;
+}
+
+.create-user-form .compact-head h4 {
+  font-size: 0.92rem;
+}
+
+.create-user-form .inbound-group {
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.create-user-form .inbound-group-title {
+  padding: 8px 10px;
+  font-size: 0.74rem;
+}
+
+.create-user-form .inbound-checklist {
+  gap: 6px;
+  padding: 10px;
+}
+
+.create-user-form .inbound-option {
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+}
+
+.create-user-form .inbound-option.selected {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.create-user-form .inbound-option strong {
+  font-size: 0.92rem;
+}
+
+.create-user-form .inbound-option small {
+  margin-top: 2px;
+  font-size: 0.8rem;
+}
+
+.create-user-form .expiry-picker {
+  gap: 4px;
+}
+
+.create-user-form .expiry-picker > label {
+  font-size: 0.82rem;
+}
+
+.create-user-form .expiry-display {
+  min-height: 40px;
+  border-radius: 10px;
+  padding: 7px 34px 7px 11px;
+  background: var(--surface-2);
+}
+
+.create-user-form .expiry-display:hover {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: var(--surface);
+}
+
+.create-user-form .expiry-display:focus-visible {
+  border-color: rgba(59, 130, 246, 0.48);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.create-user-form .expiry-display-icon {
+  width: 15px;
+  height: 15px;
+  right: 11px;
+}
+
+.create-user-form .expiry-clear {
+  width: 22px;
+  height: 22px;
+  right: 8px;
+  font-size: 0.95rem;
+}
+
+.create-user-form .expiry-shell.has-value .expiry-display {
+  padding-right: 34px;
+}
+
+.create-user-form .expiry-shell:not(.has-value) .expiry-display {
+  padding-right: 34px;
+}
+
+.create-user-form .expiry-shell:not(.has-value) .expiry-display-value {
+  display: none;
 }
 
 .login-page {

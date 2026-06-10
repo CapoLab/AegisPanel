@@ -473,7 +473,7 @@ function showUserForm() {
 
 function createUserModalBody() {
   return `
-    <form class="form" onsubmit="window.Aegis.createUser(event)">
+    <form class="form create-user-form" onsubmit="window.Aegis.createUser(event)">
       <label>Username<input name="username" required placeholder="client-name" /></label>
       <label>Panel<select name="panelId" required onchange="window.Aegis.loadUserInbounds(this.value)">${(state.data?.panels || []).map((p) => `<option value="${p.id}"${p.id === state.createUserPanelId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       <div id="user-inbound-field">${createUserInboundField()}</div>
@@ -533,7 +533,6 @@ function createUserInboundField() {
         </div>
       `).join("")}
     </div>
-    <p class="muted">Loaded from the selected Marzban panel.</p>
   `;
 }
 
@@ -591,26 +590,24 @@ function createUserExpiryField() {
   return `
     <div class="expiry-picker">
       <label>Expiry Date</label>
-      <div class="expiry-row">
-        <input name="expiresAtDate" type="date" value="${esc(value)}" onchange="window.Aegis.setCreateUserExpiryDate(this.value)" />
-        ${value ? `<button type="button" class="ghost expiry-clear" onclick="window.Aegis.clearCreateUserExpiry()">×</button>` : ""}
+      <div class="expiry-shell${value ? " has-value" : ""}">
+        <button type="button" class="expiry-display" onclick="window.Aegis.openCreateUserExpiryPicker(event)" aria-label="Select expiry date">
+          <span class="expiry-display-value">${esc(value)}</span>
+          <span class="expiry-display-icon" aria-hidden="true">${calendarIcon()}</span>
+        </button>
+        <input class="expiry-native" name="expiresAtDate" type="date" value="${esc(value)}" onchange="window.Aegis.setCreateUserExpiryDate(this.value)" />
+        ${value ? `<button type="button" class="expiry-clear" onclick="window.Aegis.clearCreateUserExpiry(event)" aria-label="Clear expiry date">×</button>` : ""}
       </div>
-      <p class="muted expiry-preview">${esc(formatExpiryPreview())}</p>
     </div>
   `;
 }
 
-function formatExpiryPreview() {
-  if (!state.createUserExpiryDate) return "No expiry";
-  const formatted = formatLocalDate(state.createUserExpiryDate);
-  return formatted ? `Expires at ${formatted} 23:59` : "No expiry";
-}
-
-function formatLocalDate(value) {
-  if (!value) return "";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+function calendarIcon() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1.5A2.5 2.5 0 0 1 22 6.5v12A2.5 2.5 0 0 1 19.5 21h-15A2.5 2.5 0 0 1 2 18.5v-12A2.5 2.5 0 0 1 4.5 4H6V3a1 1 0 0 1 1-1Zm12 8H5v8.5c0 .28.22.5.5.5h13a.5.5 0 0 0 .5-.5V10Zm0-4.5a.5.5 0 0 0-.5-.5H17v1a1 1 0 1 1-2 0V5H9v1a1 1 0 1 1-2 0V5H4.5a.5.5 0 0 0-.5.5V8h15V5.5Z"/>
+    </svg>
+  `;
 }
 
 function pad2(value) {
@@ -640,9 +637,23 @@ function setCreateUserExpiryDate(value) {
   refreshUserExpiryField();
 }
 
-function clearCreateUserExpiry() {
+function clearCreateUserExpiry(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
   state.createUserExpiryDate = "";
   refreshUserExpiryField();
+}
+
+function openCreateUserExpiryPicker(event) {
+  if (event?.target?.closest?.(".expiry-clear")) return;
+  const input = document.querySelector(".expiry-native");
+  if (!input) return;
+  if (typeof input.showPicker === "function") {
+    input.showPicker();
+    return;
+  }
+  input.focus();
+  input.click?.();
 }
 
 async function loadUserInbounds(panelId, { silent = false } = {}) {
@@ -913,6 +924,7 @@ window.Aegis = {
   clearMarzbanInbounds,
   setCreateUserExpiryDate,
   clearCreateUserExpiry,
+  openCreateUserExpiryPicker,
   createNews,
   syncPanel,
   syncUserTraffic,
