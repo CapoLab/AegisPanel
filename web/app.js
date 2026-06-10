@@ -19,6 +19,18 @@ const state = {
   createUserInboundIds: [],
   createUserExpiryDate: "",
   createUserError: "",
+  editUserId: "",
+  editUserUsername: "",
+  editUserPanelId: "",
+  editUserInbounds: [],
+  editUserInboundsLoading: false,
+  editUserInboundsError: "",
+  editUserInboundId: "",
+  editUserInboundIds: [],
+  editUserExpiryDate: "",
+  editUserFlow: "",
+  editUserActive: true,
+  editUserError: "",
   error: "",
   notice: ""
 };
@@ -130,8 +142,29 @@ function logout() {
   state.users = [];
   state.data = null;
   state.meta = null;
+  state.createUserPanelId = "";
+  state.createUserInbounds = [];
+  state.createUserInboundsLoading = false;
+  state.createUserInboundsError = "";
+  state.createUserInboundId = "";
+  state.createUserInboundIds = [];
+  state.createUserExpiryDate = "";
   state.notice = "";
   state.error = "";
+  state.createUserError = "";
+  state.editUserId = "";
+  state.editUserUsername = "";
+  state.editUserPanelId = "";
+  state.editUserInbounds = [];
+  state.editUserInboundsLoading = false;
+  state.editUserInboundsError = "";
+  state.editUserInboundId = "";
+  state.editUserInboundIds = [];
+  state.editUserExpiryDate = "";
+  state.editUserFlow = "";
+  state.editUserActive = true;
+  state.editUserError = "";
+  closeModal();
   renderLogin();
 }
 
@@ -304,12 +337,13 @@ function dashboard() {
                   <tr>
                     <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
                     <td>${esc(panelName(u.panelId))}</td>
-                    <td>${esc(displayInboundId(u) || "default")}</td>
+                    <td>${esc(vpnAccountInboundSummary(u))}</td>
                     <td>${bytes(u.usedBytes)}</td>
                     <td>${bytes(u.limitBytes)}</td>
                     <td>${dateShort(u.expiresAt)}</td>
                     <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                     <td class="row-actions">
+                      <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit</button>
                       <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                         ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                       </button>
@@ -437,12 +471,13 @@ function users() {
               <tr>
                 <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
                 <td>${esc(panelName(u.panelId))}</td>
-                <td>${esc(displayInboundId(u) || "default")}</td>
+                <td>${esc(vpnAccountInboundSummary(u))}</td>
                 <td>${bytes(u.usedBytes)}</td>
                 <td>${bytes(u.limitBytes)}</td>
                 <td>${dateShort(u.expiresAt)}</td>
                 <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                 <td class="row-actions">
+                  <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit</button>
                   <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                     ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                   </button>
@@ -618,49 +653,17 @@ function createUserInboundField() {
   if (!isMarzban) {
     return `<label>Inbound<input name="inboundId" placeholder="default" value="${esc(state.createUserInboundId || "")}" /></label>`;
   }
-  if (state.createUserInboundsLoading) {
-    return `<p class="muted">Loading Marzban inbounds...</p>`;
-  }
-  if (state.createUserInboundsError) {
-    return `<p class="alert danger">${esc(state.createUserInboundsError)}</p>`;
-  }
-  if (!state.createUserInbounds.length) {
-    return `<p class="alert danger">This Marzban panel has no inbounds yet. Load inbounds before creating a VPN account.</p>`;
-  }
-  const grouped = groupMarzbanInbounds(state.createUserInbounds);
-  return `
-    <div class="inbound-picker">
-      <div class="card-head compact-head">
-        <h4>Inbounds</h4>
-        <div class="actions">
-          <button type="button" class="ghost" onclick="window.Aegis.selectAllMarzbanInbounds()">Select all</button>
-          <button type="button" class="ghost" onclick="window.Aegis.clearMarzbanInbounds()">Clear</button>
-        </div>
-      </div>
-      ${Object.entries(grouped).map(([protocol, inbounds]) => `
-        <div class="inbound-group">
-          <div class="inbound-group-title">${esc(protocol.toUpperCase())}</div>
-          <div class="inbound-checklist">
-            ${inbounds.map((inbound) => `
-              <label class="inbound-option ${state.createUserInboundIds.includes(inbound.id) ? "selected" : ""}">
-                <input
-                  type="checkbox"
-                  name="marzbanInbound"
-                  value="${esc(inbound.id)}"
-                  ${state.createUserInboundIds.includes(inbound.id) ? "checked" : ""}
-                  onchange="window.Aegis.toggleMarzbanInboundSelection(this.value, this.checked)"
-                />
-                <span>
-                  <strong>${esc(inbound.label || inbound.id)}</strong>
-                  <small>${esc(formatInboundDetails(inbound))}</small>
-                </span>
-              </label>
-            `).join("")}
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
+  return renderMarzbanInboundPicker({
+    title: "Inbounds",
+    inbounds: state.createUserInbounds,
+    selectedIds: state.createUserInboundIds,
+    loading: state.createUserInboundsLoading,
+    error: state.createUserInboundsError,
+    emptyMessage: "This Marzban panel has no inbounds yet. Load inbounds before creating a VPN account.",
+    toggleAction: "toggleMarzbanInboundSelection",
+    selectAllAction: "selectAllMarzbanInbounds",
+    clearAction: "clearMarzbanInbounds"
+  });
 }
 
 function refreshUserInboundField() {
@@ -709,6 +712,30 @@ function isDummyOrMetricsInbound(inbound) {
   return /dummy|metrics/i.test(normalizeInboundSearchText(`${inbound?.label || ""} ${inbound?.id || ""}`));
 }
 
+function vpnAccountInboundMode(user) {
+  return user?.inboundMode === "all" ? "All" : "Custom";
+}
+
+function vpnAccountInboundCount(user) {
+  if (Array.isArray(user?.inboundIds) && user.inboundIds.length > 0) return user.inboundIds.length;
+  return user?.inboundId ? 1 : 0;
+}
+
+function vpnAccountInboundSummary(user) {
+  const mode = vpnAccountInboundMode(user);
+  const count = vpnAccountInboundCount(user);
+  return count > 0 ? `${mode} · ${count} inbounds` : mode;
+}
+
+function inboundModeFromSelection(selectedIds, allIds) {
+  const selected = Array.isArray(selectedIds) ? selectedIds.filter((id) => typeof id === "string" && id.trim()) : [];
+  const all = Array.isArray(allIds) ? allIds.filter((id) => typeof id === "string" && id.trim()) : [];
+  if (all.length > 0 && selected.length === all.length && all.every((id) => selected.includes(id))) {
+    return "all";
+  }
+  return "custom";
+}
+
 function groupMarzbanInbounds(inbounds) {
   const order = [];
   const grouped = {};
@@ -741,18 +768,94 @@ function displayInboundId(user) {
   return preferredMarzbanInboundId(inboundIds, user?.inboundId);
 }
 
+function normalizeDateInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  return `${year}-${month}-${day}`;
+}
+
+function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, error, emptyMessage, toggleAction, selectAllAction, clearAction }) {
+  if (loading) {
+    return `<p class="muted">Loading Marzban inbounds...</p>`;
+  }
+  if (error) {
+    return `<p class="alert danger">${esc(error)}</p>`;
+  }
+  if (!inbounds.length) {
+    return `<p class="alert danger">${esc(emptyMessage)}</p>`;
+  }
+  const grouped = groupMarzbanInbounds(inbounds);
+  return `
+    <div class="inbound-picker">
+      <div class="card-head compact-head">
+        <h4>${esc(title)}</h4>
+        <div class="actions">
+          <button type="button" class="ghost" onclick="window.Aegis.${selectAllAction}()">Select all</button>
+          <button type="button" class="ghost" onclick="window.Aegis.${clearAction}()">Clear</button>
+        </div>
+      </div>
+      ${Object.entries(grouped).map(([protocol, protocolInbounds]) => `
+        <div class="inbound-group">
+          <div class="inbound-group-title">${esc(protocol.toUpperCase())}</div>
+          <div class="inbound-checklist">
+            ${protocolInbounds.map((inbound) => `
+              <label class="inbound-option ${selectedIds.includes(inbound.id) ? "selected" : ""}">
+                <input
+                  type="checkbox"
+                  name="marzbanInbound"
+                  value="${esc(inbound.id)}"
+                  ${selectedIds.includes(inbound.id) ? "checked" : ""}
+                  onchange="window.Aegis.${toggleAction}(this.value, this.checked)"
+                />
+                <span>
+                  <strong>${esc(inbound.label || inbound.id)}</strong>
+                  <small>${esc(formatInboundDetails(inbound))}</small>
+                </span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function createUserExpiryField() {
-  const value = state.createUserExpiryDate || "";
+  return renderExpiryField({
+    value: state.createUserExpiryDate,
+    openAction: "openCreateUserExpiryPicker",
+    changeAction: "setCreateUserExpiryDate",
+    clearAction: "clearCreateUserExpiry",
+    valueName: "expiresAtDate"
+  });
+}
+
+function editUserExpiryField() {
+  return renderExpiryField({
+    value: state.editUserExpiryDate,
+    openAction: "openEditUserExpiryPicker",
+    changeAction: "setEditUserExpiryDate",
+    clearAction: "clearEditUserExpiry",
+    valueName: "editExpiresAtDate"
+  });
+}
+
+function renderExpiryField({ value, openAction, changeAction, clearAction, valueName }) {
+  const currentValue = value || "";
   return `
     <div class="expiry-picker">
       <label>Expiry Date</label>
-      <div class="expiry-shell${value ? " has-value" : ""}">
-        <button type="button" class="expiry-display" onclick="window.Aegis.openCreateUserExpiryPicker(event)" aria-label="Select expiry date">
-          <span class="expiry-display-value">${esc(value)}</span>
+      <div class="expiry-shell${currentValue ? " has-value" : ""}">
+        <button type="button" class="expiry-display" onclick="window.Aegis.${openAction}(event)" aria-label="Select expiry date">
+          <span class="expiry-display-value">${esc(currentValue)}</span>
           <span class="expiry-display-icon" aria-hidden="true">${calendarIcon()}</span>
         </button>
-        <input class="expiry-native" name="expiresAtDate" type="date" value="${esc(value)}" onchange="window.Aegis.setCreateUserExpiryDate(this.value)" />
-        ${value ? `<button type="button" class="expiry-clear" onclick="window.Aegis.clearCreateUserExpiry(event)" aria-label="Clear expiry date">×</button>` : ""}
+        <input class="expiry-native" name="${esc(valueName)}" type="date" value="${esc(currentValue)}" onchange="window.Aegis.${changeAction}(this.value)" />
+        ${currentValue ? `<button type="button" class="expiry-clear" onclick="window.Aegis.${clearAction}(event)" aria-label="Clear expiry date">×</button>` : ""}
       </div>
     </div>
   `;
@@ -938,7 +1041,8 @@ async function createUser(event) {
           limitBytes: gbToBytes(form.get("limitGb")),
           expiresAt,
           inboundId: preferredMarzbanInboundId(inboundIds),
-          inboundIds
+          inboundIds,
+          inboundMode: inboundModeFromSelection(inboundIds, state.createUserInbounds.map((inbound) => inbound.id))
         }
       });
     } else {
@@ -961,6 +1065,253 @@ async function createUser(event) {
     state.createUserError = error.message;
     refreshCreateUserError();
   }
+}
+
+function showEditUserForm(id) {
+  const user = state.users?.find((item) => item.id === id);
+  if (!user) {
+    state.error = "User not found";
+    renderApp();
+    return;
+  }
+  state.editUserId = user.id;
+  state.editUserUsername = user.username || "";
+  state.editUserPanelId = user.panelId || "";
+  state.editUserInbounds = [];
+  const panel = state.data?.panels?.find((item) => item.id === user.panelId);
+  state.editUserInboundsLoading = panel?.type === "marzban";
+  state.editUserInboundsError = "";
+  state.editUserInboundIds = Array.isArray(user.inboundIds) && user.inboundIds.length
+    ? user.inboundIds.filter((value) => typeof value === "string" && value.trim())
+    : [user.inboundId].filter(Boolean);
+  state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, user.inboundId);
+  state.editUserExpiryDate = normalizeDateInputValue(user.expiresAt);
+  state.editUserFlow = user.flow || "";
+  state.editUserActive = user.active !== false;
+  state.editUserError = "";
+  modal("Edit VPN account", editUserModalBody());
+  if (panel?.type === "marzban") {
+    void loadEditUserInbounds(user.id, user.panelId, { silent: true });
+  } else {
+    state.editUserInboundsLoading = false;
+  }
+}
+
+function editUserModalBody() {
+  const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
+  const isMarzban = panel?.type === "marzban";
+  return `
+    <form class="form create-user-form" onsubmit="window.Aegis.saveEditUser(event)">
+      <label>Username<input name="username" readonly value="${esc(state.editUserUsername)}" /></label>
+      <label>Panel<input readonly value="${esc(panelName(state.editUserPanelId))}" /></label>
+      <div id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label>`}</div>
+      <label>Flow<input name="flow" value="${esc(state.editUserFlow)}" placeholder="xtls-rprx-vision, optional" /></label>
+      <label>Active<input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} /></label>
+      <div id="edit-user-expiry-field">${editUserExpiryField()}</div>
+      <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
+      <button class="primary" type="submit">Save VPN account</button>
+    </form>
+  `;
+}
+
+function editUserInboundField() {
+  const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
+  if (panel?.type !== "marzban") {
+    return `<label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label>`;
+  }
+  return renderMarzbanInboundPicker({
+    title: "Inbounds",
+    inbounds: state.editUserInbounds,
+    selectedIds: state.editUserInboundIds,
+    loading: state.editUserInboundsLoading,
+    error: state.editUserInboundsError,
+    emptyMessage: "This Marzban panel has no inbounds yet. Load inbounds before saving the VPN account.",
+    toggleAction: "toggleEditMarzbanInboundSelection",
+    selectAllAction: "selectAllEditMarzbanInbounds",
+    clearAction: "clearEditMarzbanInbounds"
+  });
+}
+
+function refreshEditUserInboundField() {
+  const field = document.querySelector("#edit-user-inbound-field");
+  if (!field) {
+    setModal("Edit VPN account", editUserModalBody());
+    return;
+  }
+  field.innerHTML = editUserInboundField();
+}
+
+function refreshEditUserError() {
+  const field = document.querySelector("#edit-user-error");
+  if (!field) {
+    setModal("Edit VPN account", editUserModalBody());
+    return;
+  }
+  field.innerHTML = state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : "";
+}
+
+function refreshEditUserExpiryField() {
+  const field = document.querySelector("#edit-user-expiry-field");
+  if (!field) {
+    setModal("Edit VPN account", editUserModalBody());
+    return;
+  }
+  field.innerHTML = editUserExpiryField();
+}
+
+function toggleEditMarzbanInboundSelection(id, checked) {
+  const selected = new Set(state.editUserInboundIds);
+  if (checked) selected.add(id);
+  else selected.delete(id);
+  state.editUserInboundIds = [...selected];
+  state.editUserError = "";
+  refreshEditUserInboundField();
+  refreshEditUserError();
+}
+
+function selectAllEditMarzbanInbounds() {
+  state.editUserInboundIds = state.editUserInbounds.map((inbound) => inbound.id);
+  state.editUserError = "";
+  refreshEditUserInboundField();
+  refreshEditUserError();
+}
+
+function clearEditMarzbanInbounds() {
+  state.editUserInboundIds = [];
+  state.editUserError = "";
+  refreshEditUserInboundField();
+  refreshEditUserError();
+}
+
+function setEditUserExpiryDate(value) {
+  state.editUserExpiryDate = value;
+  state.editUserError = "";
+  refreshEditUserExpiryField();
+  refreshEditUserError();
+}
+
+function clearEditUserExpiry(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  state.editUserExpiryDate = "";
+  refreshEditUserExpiryField();
+}
+
+function openEditUserExpiryPicker(event) {
+  if (event?.target?.closest?.(".expiry-clear")) return;
+  const input = document.querySelector("#edit-user-expiry-field .expiry-native");
+  if (!input) return;
+  if (typeof input.showPicker === "function") {
+    input.showPicker();
+    return;
+  }
+  input.focus();
+  input.click?.();
+}
+
+async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
+  const panel = state.data?.panels?.find((item) => item.id === panelId);
+  if (!panel) {
+    state.editUserInbounds = [];
+    state.editUserInboundsError = "Select a panel to load inbounds.";
+    state.editUserInboundsLoading = false;
+    state.editUserInboundIds = [];
+    state.editUserInboundId = "";
+    refreshEditUserInboundField();
+    refreshEditUserError();
+    return;
+  }
+  if (panel.type !== "marzban") {
+    const user = state.users?.find((item) => item.id === userId);
+    state.editUserInbounds = [];
+    state.editUserInboundsError = "";
+    state.editUserInboundsLoading = false;
+    state.editUserInboundId = user?.inboundId || state.editUserInboundId || "";
+    state.editUserInboundIds = [state.editUserInboundId].filter(Boolean);
+    refreshEditUserInboundField();
+    refreshEditUserError();
+    return;
+  }
+  state.editUserInboundsLoading = true;
+  state.editUserInboundsError = "";
+  state.editUserInbounds = [];
+  refreshEditUserInboundField();
+  refreshEditUserError();
+  try {
+    const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
+    state.editUserInbounds = rows;
+    const existing = state.editUserInboundIds.length ? state.editUserInboundIds : [state.editUserInboundId].filter(Boolean);
+    const selected = existing.filter((id) => rows.some((row) => row.id === id));
+    state.editUserInboundIds = selected.length ? selected : rows.map((row) => row.id);
+    state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, state.editUserInboundId);
+    state.editUserInboundsError = "";
+  } catch (error) {
+    state.editUserInbounds = [];
+    state.editUserInboundIds = [];
+    state.editUserInboundId = "";
+    state.editUserInboundsError = error.message || "Failed to load Marzban inbounds";
+  } finally {
+    state.editUserInboundsLoading = false;
+    refreshEditUserInboundField();
+    refreshEditUserError();
+  }
+}
+
+async function saveEditUser(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const user = state.users?.find((item) => item.id === state.editUserId);
+  const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
+  state.error = "";
+  state.editUserError = "";
+  refreshEditUserError();
+  try {
+    if (!user) throw new Error("User not found");
+    if (panel?.type === "marzban") {
+      if (state.editUserInboundsLoading) {
+        throw new Error("Please wait for Marzban inbounds to load.");
+      }
+      const selectedInbounds = state.editUserInbounds.filter((inbound) => state.editUserInboundIds.includes(inbound.id));
+      if (!selectedInbounds.length) {
+        throw new Error("Select a Marzban inbound before saving the VPN account.");
+      }
+      const inboundIds = selectedInbounds.map((inbound) => inbound.id);
+      const expiresAt = resolveEditUserExpiry(form);
+      await api(`/api/admin/users/${user.id}`, {
+        method: "PUT",
+        body: {
+          inboundIds,
+          inboundId: preferredMarzbanInboundId(inboundIds),
+          inboundMode: inboundModeFromSelection(inboundIds, state.editUserInbounds.map((inbound) => inbound.id)),
+          expiresAt,
+          flow: form.get("flow") || "",
+          active: form.has("active")
+        }
+      });
+    } else {
+      await api(`/api/admin/users/${user.id}`, {
+        method: "PUT",
+        body: {
+          inboundId: form.get("inboundId") || user.inboundId || "default",
+          expiresAt: resolveEditUserExpiry(form),
+          flow: form.get("flow") || "",
+          active: form.has("active")
+        }
+      });
+    }
+    closeModal();
+    state.notice = "VPN account updated";
+    await load();
+  } catch (error) {
+    state.editUserError = error.message;
+    refreshEditUserError();
+  }
+}
+
+function resolveEditUserExpiry(form) {
+  const value = state.editUserExpiryDate || form.get("expiresAtDate") || "";
+  if (!value) return null;
+  return resolveLocalDateEndOfDay(value, "Please select a valid expiry date.");
 }
 
 function resolveCreateUserExpiry(form) {
@@ -1103,17 +1454,26 @@ window.Aegis = {
   showPanelForm,
   showAdminForm,
   showUserForm,
+  showEditUserForm,
   showNewsForm,
   createPanel,
   createAdmin,
   createUser,
+  saveEditUser,
   loadUserInbounds,
+  loadEditUserInbounds,
   toggleMarzbanInboundSelection,
   selectAllMarzbanInbounds,
   clearMarzbanInbounds,
   setCreateUserExpiryDate,
   clearCreateUserExpiry,
   openCreateUserExpiryPicker,
+  toggleEditMarzbanInboundSelection,
+  selectAllEditMarzbanInbounds,
+  clearEditMarzbanInbounds,
+  setEditUserExpiryDate,
+  clearEditUserExpiry,
+  openEditUserExpiryPicker,
   createNews,
   syncPanel,
   syncUserTraffic,

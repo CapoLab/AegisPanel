@@ -32,12 +32,17 @@ function normalizeInboundSearchText(value) {
 
 function publicUser(user) {
   const safe = { ...user };
+  safe.inboundMode = normalizeInboundMode(safe.inboundMode);
   if (Array.isArray(safe.inboundIds) && safe.inboundIds.length > 0) {
     safe.inboundId = preferredInboundId(safe.inboundIds, safe.inboundId);
   } else if (safe.inboundId) {
     safe.inboundId = preferredInboundId([safe.inboundId], safe.inboundId);
   }
   return safe;
+}
+
+function normalizeInboundMode(value) {
+  return value === "all" ? "all" : "custom";
 }
 
 function requiredString(body, key) {
@@ -158,6 +163,17 @@ function preferredInboundId(inboundIds, fallbackInboundId = "") {
   const selected = Array.isArray(inboundIds) ? inboundIds.filter((value) => typeof value === "string" && value.trim()) : [];
   const real = selected.find((value) => !isDummyOrMetricsInboundId(value));
   return real || selected[0] || (typeof fallbackInboundId === "string" && fallbackInboundId.trim()) || "default";
+}
+
+function selectedInboundIdsFromBody(body, fallback = []) {
+  if (Array.isArray(body?.inboundIds)) {
+    const selected = body.inboundIds.filter((value) => typeof value === "string" && value.trim());
+    if (selected.length > 0) return selected;
+  }
+  if (typeof body?.inboundId === "string" && body.inboundId.trim()) {
+    return [body.inboundId.trim()];
+  }
+  return Array.isArray(fallback) ? fallback.filter((value) => typeof value === "string" && value.trim()) : [];
 }
 
 function normalizeIsoDateOrNull(value, key) {
@@ -423,11 +439,7 @@ export async function handleApi(req, res, route) {
     const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
-    const inboundIds = Array.isArray(body.inboundIds)
-      ? body.inboundIds.filter((value) => typeof value === "string" && value.trim())
-      : typeof body.inboundId === "string" && body.inboundId.trim()
-        ? [body.inboundId.trim()]
-        : [];
+    const inboundIds = selectedInboundIdsFromBody(body);
     enforceResellerValidity(actor, body.expiresAt);
     const requestedLimitBytes = Object.prototype.hasOwnProperty.call(body, "limitBytes")
       ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes")
@@ -454,6 +466,7 @@ export async function handleApi(req, res, route) {
       uuid: body.uuid || null,
       subscriptionId: body.subscriptionId || null,
       inboundId: primaryInboundId,
+      inboundMode: normalizeInboundMode(body.inboundMode),
       flow: body.flow || "",
       active: body.active !== false,
       limitBytes: requestedLimitBytes,
@@ -506,13 +519,49 @@ export async function handleApi(req, res, route) {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const body = await readJson(req);
-    const blockedField = ["ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"].find((field) =>
+    const blockedField = ["username", "panelId", "ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"].find((field) =>
       Object.prototype.hasOwnProperty.call(body, field)
     );
     if (blockedField) {
       return sendJson(res, 400, { ok: false, error: `Cannot update ${blockedField}` });
     }
-    const updated = store.update("users", user.id, body);
+    const panel = store.find("panels", user.panelId);
+    const inboundIds = selectedInboundIdsFromBody(body, user.inboundIds || [user.inboundId]);
+    const primaryInboundId = preferredInboundId(inboundIds, body.inboundId ?? user.inboundId);
+    const updatePatch = {
+      ...body,
+      inboundId: primaryInboundId,
+      inboundMode: normalizeInboundMode(body.inboundMode ?? user.inboundMode),
+      expiresAt: Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : user.expiresAt || null,
+      flow: Object.prototype.hasOwnProperty.call(body, "flow") ? body.flow || "" : user.flow || "",
+      active: Object.prototype.hasOwnProperty.call(body, "active") ? body.active !== false : user.active !== false
+    };
+    if (inboundIds.length > 0) {
+      updatePatch.inboundIds = inboundIds;
+    } else {
+      delete updatePatch.inboundIds;
+    }
+    delete updatePatch.username;
+    delete updatePatch.panelId;
+    delete updatePatch.ownerAdminId;
+    delete updatePatch.limitBytes;
+    delete updatePatch.usedBytes;
+    delete updatePatch.reservedBytes;
+    if (panel?.type === "marzban") {
+      const adapter = adapterFor(panel.type);
+      if (!adapter || typeof adapter.updateUser !== "function") {
+        return sendJson(res, 501, { ok: false, error: "Real user update is not available for this panel type yet" });
+      }
+      try {
+        await adapter.updateUser(panel, user, updatePatch);
+      } catch (error) {
+        return sendJson(res, error.status || 502, {
+          ok: false,
+          error: error.message || "Marzban user update failed"
+        });
+      }
+    }
+    const updated = store.update("users", user.id, updatePatch);
     store.audit(actor, "user.update", user.id);
     return sendJson(res, 200, { ok: true, data: publicUser(updated) });
   }
