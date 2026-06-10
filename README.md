@@ -25,7 +25,7 @@ The public install path will be Docker-first.
 Planned shape:
 
 ```bash
-git clone https://github.com/YOUNGGUNNAA/AegisPanel.git
+git clone https://github.com/CapoLab/AegisPanel.git
 cd AegisPanel
 docker compose up -d
 ```
