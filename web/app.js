@@ -146,8 +146,8 @@ function nav() {
   const items = [
     ["dashboard", "Dashboard", "Overview and live totals"],
     ["panels", "Panels", "Panel registry and sync"],
-    ["admins", "Admins", "Operators and resellers"],
-    ["users", "Users", "Clients and traffic"],
+    ["admins", "Resellers", "SuperAdmin and reseller accounts"],
+    ["users", "VPN Accounts", "Customers and traffic"],
     ["operations", "Operations", "Backup, logs, system"]
   ];
   return items.map(([key, label, hint]) => `
@@ -165,7 +165,7 @@ function shell(content) {
           <div class="mark">A</div>
           <div>
             <strong>AegisPanel</strong>
-            <span>${esc(state.admin?.username)} / ${esc(state.admin?.role)}</span>
+            <span>${esc(state.admin?.username)} / ${esc(roleLabel(state.admin?.role))}</span>
           </div>
         </div>
         <nav class="nav">${nav()}</nav>
@@ -204,15 +204,21 @@ function metric(label, value, hint = "") {
   return `<article class="metric-card"><span>${label}</span><strong>${value ?? 0}</strong><small>${hint}</small></article>`;
 }
 
+function roleLabel(role) {
+  if (role === "admin") return "Reseller";
+  if (role === "superadmin") return "SuperAdmin";
+  return role || "-";
+}
+
 function dashboard() {
   const totals = state.data?.totals || {};
   const distribution = state.data?.distribution || {};
   return `
     ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, users, traffic, and operations.")}
     <section class="metrics">
-      ${metric("Admins", totals.admins, "superadmin + resellers")}
+      ${metric("Resellers", totals.admins, "superadmin + resellers")}
       ${metric("Panels", totals.panels, "registered upstreams")}
-      ${metric("Users", totals.users, `${totals.activeUsers || 0} active`)}
+      ${metric("VPN Accounts", totals.users, `${totals.activeUsers || 0} active`)}
       ${metric("Traffic Used", bytes(totals.usedBytes), `${bytes(totals.limitBytes)} allocated`)}
     </section>
     <section class="split">
@@ -281,8 +287,9 @@ function panels() {
 
 function admins() {
   return `
-    ${pageTitle("Admins", "Manage super admins and reseller/operator accounts with traffic policy.", `<button class="primary" onclick="window.Aegis.showAdminForm()">New admin</button>`)}
+    ${pageTitle("Resellers", "Manage super admins and reseller accounts with traffic quota and validity windows.", `<button class="primary" onclick="window.Aegis.showAdminForm()">New reseller</button>`)}
     <section class="card">
+      <p class="muted section-note">Resellers receive quota and validity from SuperAdmin. Future reseller limits should stay within the assigned validity window.</p>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>Username</th><th>Role</th><th>Panel</th><th>Traffic</th><th>Return</th><th>Status</th><th></th></tr></thead>
@@ -290,7 +297,7 @@ function admins() {
             ${state.admins.map((a) => `
               <tr>
                 <td><strong>${esc(a.username)}</strong></td>
-                <td><span class="badge">${esc(a.role)}</span></td>
+                <td><span class="badge">${esc(roleLabel(a.role))}</span></td>
                 <td>${esc(panelName(a.panelId))}</td>
                 <td>${a.trafficLimitBytes ? bytes(a.trafficLimitBytes) : "Unlimited"}</td>
                 <td>${a.deleteReturnTraffic ? "Delete" : "-"} ${a.updateReturnTraffic ? "Update" : ""}</td>
@@ -307,11 +314,12 @@ function admins() {
 
 function users() {
   return `
-    ${pageTitle("Users", "Create clients, assign panel/inbound, control quota, expiry, flow, and deletion return.", `<button class="primary" onclick="window.Aegis.showUserForm()">New user</button>`)}
+    ${pageTitle("VPN Accounts", "Create reseller-scoped VPN accounts, assign panel/inbound, and control quota, expiry, flow, and deletion return.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
     <section class="card">
+      <p class="muted section-note">VPN accounts are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>User</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>VPN Account</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${state.users.map((u) => `
               <tr>
@@ -444,15 +452,15 @@ function showPanelForm() {
 }
 
 function showAdminForm() {
-  modal("New admin", `
+  modal("New reseller", `
     <form class="form" onsubmit="window.Aegis.createAdmin(event)">
       <label>Username<input name="username" required placeholder="reseller-01" /></label>
       <label>Password<input name="password" required type="password" placeholder="Strong password" /></label>
-      <label>Role<select name="role"><option value="admin">Admin</option><option value="superadmin">SuperAdmin</option></select></label>
+      <label>Role<select name="role"><option value="admin">Reseller</option><option value="superadmin">SuperAdmin</option></select></label>
       <label>Panel<select name="panelId"><option value="">No fixed panel</option>${(state.data?.panels || []).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
       <label>Traffic limit (GB)<input name="trafficGb" type="number" min="0" step="1" placeholder="100" /></label>
       <div class="check-row"><label><input name="deleteReturnTraffic" type="checkbox" checked /> Return traffic on delete</label><label><input name="updateReturnTraffic" type="checkbox" checked /> Return traffic on update</label></div>
-      <button class="primary" type="submit">Create admin</button>
+      <button class="primary" type="submit">Create reseller</button>
     </form>
   `);
 }
@@ -465,7 +473,7 @@ function showUserForm() {
   state.createUserInboundId = "";
   state.createUserInboundIds = [];
   state.createUserExpiryDate = "";
-  modal("New user", createUserModalBody());
+  modal("Create VPN account", createUserModalBody());
   if (state.createUserPanelId) {
     void loadUserInbounds(state.createUserPanelId, { silent: true });
   }
@@ -480,7 +488,7 @@ function createUserModalBody() {
       <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
       <label>Traffic limit (GB)<input name="limitGb" type="number" min="0" step="1" value="25" /></label>
       <div id="user-expiry-field">${createUserExpiryField()}</div>
-      <button class="primary" type="submit">Create user</button>
+      <button class="primary" type="submit">Create VPN account</button>
     </form>
   `;
 }
@@ -539,7 +547,7 @@ function createUserInboundField() {
 function refreshUserInboundField() {
   const field = document.querySelector("#user-inbound-field");
   if (!field) {
-    setModal("New user", createUserModalBody());
+    setModal("Create VPN account", createUserModalBody());
     return;
   }
   field.innerHTML = createUserInboundField();
@@ -548,7 +556,7 @@ function refreshUserInboundField() {
 function refreshUserExpiryField() {
   const field = document.querySelector("#user-expiry-field");
   if (!field) {
-    setModal("New user", createUserModalBody());
+    setModal("Create VPN account", createUserModalBody());
     return;
   }
   field.innerHTML = createUserExpiryField();
@@ -736,7 +744,7 @@ async function createAdmin(event) {
         updateReturnTraffic: form.has("updateReturnTraffic")
       }
     });
-  }, "Admin created");
+  }, "Reseller created");
 }
 
 async function createUser(event) {
@@ -750,7 +758,7 @@ async function createUser(event) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
       if (!state.createUserInboundIds.length) {
-        throw new Error(state.createUserInboundsError || "Select a Marzban inbound before creating the user.");
+        throw new Error(state.createUserInboundsError || "Select a Marzban inbound before creating the VPN account.");
       }
       const inboundId = state.createUserInboundIds[0];
       const expiresAt = resolveCreateUserExpiry(form);
@@ -781,7 +789,7 @@ async function createUser(event) {
       method: "POST",
       body
     });
-  }, "User created");
+  }, "VPN account created");
 }
 
 function resolveCreateUserExpiry(form) {
@@ -856,7 +864,7 @@ async function syncUserTraffic(id) {
         users: state.users
       };
     }
-    state.notice = "User traffic synced";
+    state.notice = "VPN account traffic synced";
     state.error = "";
   } catch (error) {
     state.error = error.message || "Traffic sync failed";
@@ -872,13 +880,13 @@ async function deletePanel(id) {
 }
 
 async function deleteAdmin(id) {
-  if (!confirm("Delete this admin?")) return;
-  await runAction(() => api(`/api/superadmin/admins/${id}`, { method: "DELETE" }), "Admin deleted");
+  if (!confirm("Delete this reseller?")) return;
+  await runAction(() => api(`/api/superadmin/admins/${id}`, { method: "DELETE" }), "Reseller deleted");
 }
 
 async function deleteUser(id) {
-  if (!confirm("Delete this user? Remaining traffic will return when enabled.")) return;
-  await runAction(() => api(`/api/admin/users/${id}`, { method: "DELETE" }), "User deleted");
+  if (!confirm("Delete this VPN account? Remaining traffic will return when enabled.")) return;
+  await runAction(() => api(`/api/admin/users/${id}`, { method: "DELETE" }), "VPN account deleted");
 }
 
 async function runAction(action, message) {
