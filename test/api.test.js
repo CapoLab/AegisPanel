@@ -45,6 +45,16 @@ async function importApiFresh() {
   return handleApi;
 }
 
+async function withMockDateNow(now, fn) {
+  const originalNow = Date.now;
+  Date.now = () => now;
+  try {
+    return await fn();
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 test("loads local env file values without insecure defaults", async () => {
   await withTempEnv({}, async (tempDir) => {
     await writeFile(
@@ -247,6 +257,81 @@ test("existing valid admin user flow still passes", async () => {
   );
 });
 
+test("repeated failed login attempts eventually return 429", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      await withMockDateNow(1_000_000, async () => {
+        for (let attempt = 1; attempt <= 5; attempt += 1) {
+          const res = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            session: undefined,
+            body: { username: "env-admin", password: "wrong-pass" },
+            remoteAddress: "10.0.0.5"
+          });
+          assert.equal(res.statusCode, 401);
+        }
+
+        const blocked = await callApiWithOutcome(handleApi, {
+          method: "POST",
+          pathname: "/api/auth/login",
+          body: { username: "env-admin", password: "wrong-pass" },
+          remoteAddress: "10.0.0.5"
+        });
+        assert.equal(blocked.statusCode, 429);
+        assert.match(blocked.json.error, /Too many failed login attempts/);
+      });
+    }
+  );
+});
+
+test("rate limiting does not affect unrelated endpoints", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      await withMockDateNow(2_000_000, async () => {
+        for (let attempt = 1; attempt <= 5; attempt += 1) {
+          await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            body: { username: "env-admin", password: "wrong-pass" },
+            remoteAddress: "10.0.0.6"
+          });
+        }
+
+        const health = await callApiWithOutcome(handleApi, {
+          method: "GET",
+          pathname: "/api/health",
+          remoteAddress: "10.0.0.6"
+        });
+        assert.equal(health.statusCode, 200);
+        assert.equal(health.json.ok, true);
+
+        const otherIpLogin = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/auth/login",
+          body: { username: "env-admin", password: "env-pass" },
+          remoteAddress: "10.0.0.7"
+        });
+        assert.equal(otherIpLogin.session.length > 0, true);
+      });
+    }
+  );
+});
+
 test("panel credentials are stripped from api responses", async () => {
   await withTempEnv(
     {
@@ -351,8 +436,8 @@ function createMockResponse() {
   };
 }
 
-async function callApi(handleApi, { method, pathname, session, body }) {
-  const req = createMockRequest(method, pathname, session, body);
+async function callApi(handleApi, { method, pathname, session, body, remoteAddress }) {
+  const req = createMockRequest(method, pathname, session, body, undefined, remoteAddress);
   const res = createMockResponse();
   const route = { method, pathname, search: new URLSearchParams() };
   await handleApi(req, res, route);
@@ -361,8 +446,8 @@ async function callApi(handleApi, { method, pathname, session, body }) {
   return res.json.data ?? res.json;
 }
 
-async function callApiWithOutcome(handleApi, { method, pathname, session, body, rawBody }) {
-  const req = createMockRequest(method, pathname, session, body, rawBody);
+async function callApiWithOutcome(handleApi, { method, pathname, session, body, rawBody, remoteAddress }) {
+  const req = createMockRequest(method, pathname, session, body, rawBody, remoteAddress);
   const res = createMockResponse();
   const route = { method, pathname, search: new URLSearchParams() };
   try {
@@ -374,11 +459,12 @@ async function callApiWithOutcome(handleApi, { method, pathname, session, body, 
   return res;
 }
 
-function createMockRequest(method, pathname, session, body, rawBody) {
+function createMockRequest(method, pathname, session, body, rawBody, remoteAddress = "127.0.0.1") {
   const payload = rawBody ?? (body ? JSON.stringify(body) : "");
   return {
     method,
     url: pathname,
+    socket: { remoteAddress },
     headers: {
       "content-type": "application/json",
       ...(session ? { "x-aegis-session": session } : {})

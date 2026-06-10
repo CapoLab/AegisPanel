@@ -7,6 +7,10 @@ import { adapterFor, supportedPanels } from "../adapters/registry.js";
 import { hashPassword, signSession, verifyPassword, verifySession } from "../utils/security.js";
 import { readJson, sendJson } from "../utils/http.js";
 
+const loginAttempts = new Map();
+const LOGIN_LIMIT = 5;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+
 function publicAdmin(admin) {
   const { passwordHash, ...safe } = admin;
   return safe;
@@ -25,6 +29,36 @@ function requiredString(body, key) {
     throw error;
   }
   return value.trim();
+}
+
+function loginRateKey(req) {
+  return req.socket?.remoteAddress || req.connection?.remoteAddress || "unknown";
+}
+
+function getLoginPenalty(req) {
+  const key = loginRateKey(req);
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || now - entry.firstAttemptAt >= LOGIN_WINDOW_MS) {
+    const fresh = { count: 0, firstAttemptAt: now };
+    loginAttempts.set(key, fresh);
+    return fresh;
+  }
+  return entry;
+}
+
+function recordFailedLogin(req) {
+  const entry = getLoginPenalty(req);
+  entry.count += 1;
+  if (entry.count > LOGIN_LIMIT) {
+    const error = new Error("Too many failed login attempts. Please try again later.");
+    error.status = 429;
+    throw error;
+  }
+}
+
+function clearLoginPenalty(req) {
+  loginAttempts.delete(loginRateKey(req));
 }
 
 function requireAuth(req, role) {
@@ -120,8 +154,10 @@ export async function handleApi(req, res, route) {
     const password = requiredString(body, "password");
     const admin = store.list("admins").find((item) => item.username === username);
     if (!admin || !admin.active || !verifyPassword(password, admin.passwordHash)) {
+      recordFailedLogin(req);
       return sendJson(res, 401, { ok: false, error: "Invalid credentials" });
     }
+    clearLoginPenalty(req);
     const session = signSession({ sub: admin.id, username: admin.username, role: admin.role }, config.sessionSecret);
     store.audit(admin, "auth.login", admin.id);
     return sendJson(res, 200, { ok: true, session, admin: publicAdmin(admin) });
