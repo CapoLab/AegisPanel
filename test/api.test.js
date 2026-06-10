@@ -1292,6 +1292,287 @@ test("marzban traffic lookup failure prevents delete and quota return", async ()
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/lookup-fail");
 });
 
+test("marzban single-user traffic sync updates local usedBytes", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "sync-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-4", username: "sync-me", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ used_traffic: 432 })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "sync-me",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 10,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const synced = await callApi(handleApi, {
+            method: "POST",
+            pathname: `/api/admin/users/${created.id}/sync-traffic`,
+            session: login.session
+          });
+          assert.equal(synced.usedBytes, 432);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          const syncedUser = users.find((user) => user.username === "sync-me");
+          assert.equal(syncedUser.usedBytes, 432);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/sync-me");
+  assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban single-user traffic sync failure leaves local usedBytes unchanged", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "sync-fail-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-5", username: "sync-fail", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "boom" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "sync-fail",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 10,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const syncRes = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: `/api/admin/users/${created.id}/sync-traffic`,
+            session: login.session
+          });
+          assert.equal(syncRes.statusCode, 500);
+          assert.match(syncRes.json.error, /Marzban user lookup failed with HTTP 500/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          const syncedUser = users.find((user) => user.username === "sync-fail");
+          assert.equal(syncedUser.usedBytes, 10);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/sync-fail");
+});
+
+test("missing user returns 404 for single-user traffic sync", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users/user_missing/sync-traffic",
+        session: login.session
+      });
+      assert.equal(res.statusCode, 404);
+      assert.match(res.json.error, /User not found/i);
+    }
+  );
+});
+
+test("non-marzban panels return not implemented for single-user traffic sync", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Local Panel",
+          type: "tx-ui",
+          url: "https://tx.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "local-user",
+          panelId: panel.id
+        }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: `/api/admin/users/${user.id}/sync-traffic`,
+        session: login.session
+      });
+      assert.equal(res.statusCode, 501);
+      assert.match(res.json.error, /Traffic sync is only implemented for Marzban panels/i);
+    }
+  );
+});
+
 test("repeated failed login attempts eventually return 429", async () => {
   await withTempEnv(
     {

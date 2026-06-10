@@ -431,6 +431,33 @@ export async function handleApi(req, res, route) {
     return sendJson(res, 200, { ok: true, data: updated });
   }
 
+  const userTrafficSyncId = match(pathname, "/api/admin/users/:id/sync-traffic");
+  if (userTrafficSyncId && method === "POST") {
+    const user = scopedUsers(actor).find((item) => item.id === userTrafficSyncId.id);
+    if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
+    const panel = store.find("panels", user.panelId);
+    if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    if (panel.type !== "marzban") {
+      return sendJson(res, 501, { ok: false, error: "Traffic sync is only implemented for Marzban panels" });
+    }
+    const adapter = adapterFor(panel.type);
+    if (!adapter || typeof adapter.syncUserTraffic !== "function") {
+      return sendJson(res, 501, { ok: false, error: "Single-user traffic sync is not available for this panel type yet" });
+    }
+    try {
+      const result = await adapter.syncUserTraffic(panel, user);
+      const usedBytes = finiteQuotaBytes(result?.usedBytes);
+      const updated = usedBytes !== null ? store.update("users", user.id, { usedBytes }) : user;
+      store.audit(actor, "user.syncTraffic", user.id, { username: user.username, usedBytes: updated.usedBytes });
+      return sendJson(res, 200, { ok: true, data: updated });
+    } catch (error) {
+      return sendJson(res, error.status || 502, {
+        ok: false,
+        error: error.message || "Marzban traffic sync failed"
+      });
+    }
+  }
+
   if (userId && method === "DELETE") {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
