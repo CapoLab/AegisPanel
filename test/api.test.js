@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readJson } from "../src/utils/http.js";
 import { hashPassword, verifyPassword, signSession, verifySession } from "../src/utils/security.js";
 import { supportedPanels, adapterFor } from "../src/adapters/registry.js";
 
@@ -146,6 +147,24 @@ test("oversized JSON request returns 413", async () => {
       assert.equal(res.json.error, "Request body too large");
     }
   );
+});
+
+test("oversized request bodies are rejected while streaming chunks", async () => {
+  let thirdChunkRead = false;
+  const req = {
+    [Symbol.asyncIterator]: async function* () {
+      yield Buffer.alloc(700_000, 97);
+      yield Buffer.alloc(400_001, 98);
+      thirdChunkRead = true;
+      yield Buffer.from('{"after":"limit"}');
+    }
+  };
+  await assert.rejects(readJson(req), (error) => {
+    assert.equal(error.status, 413);
+    assert.equal(error.message, "Request body too large");
+    return true;
+  });
+  assert.equal(thirdChunkRead, false);
 });
 
 test("invalid JSON returns 400", async () => {

@@ -1,16 +1,16 @@
 export async function readJson(req, { limitBytes = 1024 * 1024 } = {}) {
   const chunks = [];
   let totalBytes = 0;
-  for await (const chunk of req) chunks.push(chunk);
-  if (!chunks.length) return {};
-  for (const chunk of chunks) {
+  for await (const chunk of req) {
     totalBytes += chunk.length;
     if (totalBytes > limitBytes) {
       const error = new Error("Request body too large");
       error.status = 413;
       throw error;
     }
+    chunks.push(chunk);
   }
+  if (!chunks.length) return {};
   const raw = Buffer.concat(chunks).toString("utf8");
   try {
     return JSON.parse(raw);
