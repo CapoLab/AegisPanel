@@ -61,6 +61,19 @@ function clearLoginPenalty(req) {
   loginAttempts.delete(loginRateKey(req));
 }
 
+function canDeleteAdmin(actor, targetAdmin, superadminCount) {
+  if (!targetAdmin) {
+    return { status: 404, error: "Admin not found" };
+  }
+  if (targetAdmin.id === actor.id) {
+    return { status: 400, error: "You cannot delete your own account" };
+  }
+  if (targetAdmin.role === "superadmin" && superadminCount <= 1) {
+    return { status: 409, error: "At least one superadmin must remain" };
+  }
+  return null;
+}
+
 function requireAuth(req, role) {
   const session = req.headers["x-aegis-session"] || "";
   const payload = verifySession(session, config.sessionSecret);
@@ -127,6 +140,8 @@ function match(pathname, pattern) {
   }
   return params;
 }
+
+export { canDeleteAdmin };
 
 export async function handleApi(req, res, route) {
   const { method, pathname } = route;
@@ -214,6 +229,10 @@ export async function handleApi(req, res, route) {
 
   if (adminId && method === "DELETE") {
     const superadmin = requireAuth(req, "superadmin");
+    const targetAdmin = store.find("admins", adminId.id);
+    const superadminCount = store.list("admins").filter((admin) => admin.role === "superadmin" && admin.active).length;
+    const blocked = canDeleteAdmin(superadmin, targetAdmin, superadminCount);
+    if (blocked) return sendJson(res, blocked.status, { ok: false, error: blocked.error });
     const removed = store.remove("admins", adminId.id);
     store.audit(superadmin, "admin.delete", adminId.id);
     return sendJson(res, removed ? 200 : 404, { ok: removed });

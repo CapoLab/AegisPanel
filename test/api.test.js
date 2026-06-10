@@ -421,6 +421,59 @@ test("panel credentials are stripped from api responses", async () => {
   );
 });
 
+test("a superadmin cannot delete itself", async () => {
+  const { canDeleteAdmin } = await importFresh("../src/routes/api.js");
+  const actor = { id: "adm_1", role: "superadmin" };
+  const result = canDeleteAdmin(actor, actor, 1);
+  assert.equal(result.status, 400);
+  assert.match(result.error, /cannot delete your own account/i);
+});
+
+test("the last superadmin cannot be deleted", async () => {
+  const { canDeleteAdmin } = await importFresh("../src/routes/api.js");
+  const actor = { id: "adm_1", role: "superadmin" };
+  const target = { id: "adm_2", role: "superadmin" };
+  const result = canDeleteAdmin(actor, target, 1);
+  assert.equal(result.status, 409);
+  assert.match(result.error, /At least one superadmin must remain/i);
+});
+
+test("a normal admin can still be deleted by a superadmin", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const admin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "team-admin",
+          password: "admin-pass",
+          role: "admin"
+        }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "DELETE",
+        pathname: `/api/superadmin/admins/${admin.id}`,
+        session: login.session
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json.ok, true);
+    }
+  );
+});
+
 function createMockResponse() {
   return {
     statusCode: 200,
