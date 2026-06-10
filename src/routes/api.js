@@ -134,6 +134,16 @@ function parseNonNegativeFiniteBytes(value, key, { allowMissing = false, default
   return value;
 }
 
+function isDummyOrMetricsInboundId(value) {
+  return /dummy|metrics/i.test(String(value || ""));
+}
+
+function preferredInboundId(inboundIds, fallbackInboundId = "") {
+  const selected = Array.isArray(inboundIds) ? inboundIds.filter((value) => typeof value === "string" && value.trim()) : [];
+  const real = selected.find((value) => !isDummyOrMetricsInboundId(value));
+  return real || selected[0] || (typeof fallbackInboundId === "string" && fallbackInboundId.trim()) || "default";
+}
+
 function normalizeIsoDateOrNull(value, key) {
   if (value == null || value === "") return null;
   const date = new Date(value);
@@ -397,6 +407,11 @@ export async function handleApi(req, res, route) {
     const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
+    const inboundIds = Array.isArray(body.inboundIds)
+      ? body.inboundIds.filter((value) => typeof value === "string" && value.trim())
+      : typeof body.inboundId === "string" && body.inboundId.trim()
+        ? [body.inboundId.trim()]
+        : [];
     enforceResellerValidity(actor, body.expiresAt);
     const requestedLimitBytes = Object.prototype.hasOwnProperty.call(body, "limitBytes")
       ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes")
@@ -415,12 +430,7 @@ export async function handleApi(req, res, route) {
         trafficRemainingBytes: ownerRemainingBytes - requestedLimitBytes
       });
     }
-    const inboundIds = Array.isArray(body.inboundIds)
-      ? body.inboundIds.filter((value) => typeof value === "string" && value.trim())
-      : typeof body.inboundId === "string" && body.inboundId.trim()
-        ? [body.inboundId.trim()]
-        : [];
-    const primaryInboundId = inboundIds[0] || (typeof body.inboundId === "string" && body.inboundId.trim()) || "default";
+    const primaryInboundId = preferredInboundId(inboundIds, body.inboundId);
     const userRecord = {
       ownerAdminId: owner.id,
       panelId: panel.id,

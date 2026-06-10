@@ -18,6 +18,7 @@ const state = {
   createUserInboundId: "",
   createUserInboundIds: [],
   createUserExpiryDate: "",
+  createUserError: "",
   error: "",
   notice: ""
 };
@@ -581,6 +582,8 @@ function showAdminForm() {
 }
 
 function showUserForm() {
+  state.error = "";
+  state.createUserError = "";
   state.createUserPanelId = state.data?.panels?.[0]?.id || "";
   state.createUserInbounds = [];
   state.createUserInboundsLoading = false;
@@ -603,6 +606,7 @@ function createUserModalBody() {
       <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
       <label>Traffic limit (GB)<input name="limitGb" type="number" min="0" step="1" value="25" /></label>
       <div id="user-expiry-field">${createUserExpiryField()}</div>
+      <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
       <button class="primary" type="submit">Create VPN account</button>
     </form>
   `;
@@ -668,6 +672,15 @@ function refreshUserInboundField() {
   field.innerHTML = createUserInboundField();
 }
 
+function refreshCreateUserError() {
+  const field = document.querySelector("#user-create-error");
+  if (!field) {
+    setModal("Create VPN account", createUserModalBody());
+    return;
+  }
+  field.innerHTML = state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : "";
+}
+
 function refreshUserExpiryField() {
   const field = document.querySelector("#user-expiry-field");
   if (!field) {
@@ -684,6 +697,10 @@ function formatInboundOption(inbound) {
 
 function formatInboundDetails(inbound) {
   return [inbound.protocol, inbound.network, inbound.tls, inbound.port].filter((part) => part !== "" && part !== null && part !== undefined).join("/");
+}
+
+function isDummyOrMetricsInbound(inbound) {
+  return /dummy|metrics/i.test(`${inbound?.label || ""} ${inbound?.id || ""}`);
 }
 
 function groupMarzbanInbounds(inbounds) {
@@ -705,7 +722,12 @@ function groupMarzbanInbounds(inbounds) {
 }
 
 function normalMarzbanInboundIds(inbounds) {
-  return inbounds.filter((inbound) => !/dummy|metrics/i.test(`${inbound.label || ""} ${inbound.id || ""}`)).map((inbound) => inbound.id);
+  return inbounds.map((inbound) => inbound.id);
+}
+
+function preferredMarzbanInboundId(inboundIds, fallbackId = "") {
+  const real = inboundIds.find((id) => !isDummyOrMetricsInbound({ id }));
+  return real || inboundIds[0] || fallbackId || "default";
 }
 
 function createUserExpiryField() {
@@ -742,22 +764,30 @@ function toggleMarzbanInboundSelection(id, checked) {
   if (checked) selected.add(id);
   else selected.delete(id);
   state.createUserInboundIds = [...selected];
+  state.createUserError = "";
   refreshUserInboundField();
+  refreshCreateUserError();
 }
 
 function selectAllMarzbanInbounds() {
   state.createUserInboundIds = normalMarzbanInboundIds(state.createUserInbounds);
+  state.createUserError = "";
   refreshUserInboundField();
+  refreshCreateUserError();
 }
 
 function clearMarzbanInbounds() {
   state.createUserInboundIds = [];
+  state.createUserError = "";
   refreshUserInboundField();
+  refreshCreateUserError();
 }
 
 function setCreateUserExpiryDate(value) {
   state.createUserExpiryDate = value;
+  state.createUserError = "";
   refreshUserExpiryField();
+  refreshCreateUserError();
 }
 
 function clearCreateUserExpiry(event) {
@@ -781,6 +811,7 @@ function openCreateUserExpiryPicker(event) {
 
 async function loadUserInbounds(panelId, { silent = false } = {}) {
   state.createUserPanelId = panelId;
+  state.createUserError = "";
   const panel = state.data?.panels?.find((item) => item.id === panelId);
   if (!panel) {
     state.createUserInbounds = [];
@@ -789,6 +820,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
     state.createUserInboundId = "";
     state.createUserInboundIds = [];
     refreshUserInboundField();
+    refreshCreateUserError();
     return;
   }
   if (panel.type !== "marzban") {
@@ -798,6 +830,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
     state.createUserInboundId = "";
     state.createUserInboundIds = [];
     refreshUserInboundField();
+    refreshCreateUserError();
     return;
   }
   state.createUserInboundsLoading = true;
@@ -805,11 +838,12 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
   state.createUserInbounds = [];
   state.createUserInboundId = "";
   refreshUserInboundField();
+  refreshCreateUserError();
   try {
     const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
     state.createUserInbounds = rows;
     state.createUserInboundIds = normalMarzbanInboundIds(rows);
-    state.createUserInboundId = state.createUserInboundIds[0] || "";
+    state.createUserInboundId = preferredMarzbanInboundId(state.createUserInboundIds);
     state.createUserInboundsError = "";
   } catch (error) {
     state.createUserInbounds = [];
@@ -819,6 +853,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
   } finally {
     state.createUserInboundsLoading = false;
     refreshUserInboundField();
+    refreshCreateUserError();
   }
 }
 
@@ -869,44 +904,52 @@ async function createUser(event) {
   const form = new FormData(event.target);
   const panelId = form.get("panelId");
   const panel = state.data?.panels?.find((item) => item.id === panelId);
-  await runAction(async () => {
+  state.error = "";
+  state.createUserError = "";
+  refreshCreateUserError();
+  try {
     if (panel?.type === "marzban") {
       if (state.createUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
-      if (!state.createUserInboundIds.length) {
-        throw new Error(state.createUserInboundsError || "Select a Marzban inbound before creating the VPN account.");
+      const selectedInbounds = state.createUserInbounds.filter((inbound) => state.createUserInboundIds.includes(inbound.id));
+      if (!selectedInbounds.length) {
+        throw new Error("Select a Marzban inbound before creating the VPN account.");
       }
-      const inboundId = state.createUserInboundIds[0];
       const expiresAt = resolveCreateUserExpiry(form);
-      const body = {
-        username: form.get("username"),
-        panelId,
-        flow: form.get("flow") || "",
-        limitBytes: gbToBytes(form.get("limitGb")),
-        expiresAt,
-        inboundId,
-        inboundIds: state.createUserInboundIds
-      };
+      const inboundIds = selectedInbounds.map((inbound) => inbound.id);
       await api("/api/admin/users", {
         method: "POST",
-        body
+        body: {
+          username: form.get("username"),
+          panelId,
+          flow: form.get("flow") || "",
+          limitBytes: gbToBytes(form.get("limitGb")),
+          expiresAt,
+          inboundId: preferredMarzbanInboundId(inboundIds),
+          inboundIds
+        }
       });
-      return;
+    } else {
+      await api("/api/admin/users", {
+        method: "POST",
+        body: {
+          username: form.get("username"),
+          panelId,
+          flow: form.get("flow") || "",
+          limitBytes: gbToBytes(form.get("limitGb")),
+          expiresAt: resolveCreateUserExpiry(form),
+          inboundId: form.get("inboundId") || "default"
+        }
+      });
     }
-    const body = {
-      username: form.get("username"),
-      panelId,
-      flow: form.get("flow") || "",
-      limitBytes: gbToBytes(form.get("limitGb")),
-      expiresAt: resolveCreateUserExpiry(form),
-      inboundId: form.get("inboundId") || "default"
-    };
-    await api("/api/admin/users", {
-      method: "POST",
-      body
-    });
-  }, "VPN account created");
+    closeModal();
+    state.notice = "VPN account created";
+    await load();
+  } catch (error) {
+    state.createUserError = error.message;
+    refreshCreateUserError();
+  }
 }
 
 function resolveCreateUserExpiry(form) {

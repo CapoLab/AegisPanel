@@ -2319,6 +2319,182 @@ test("marzban createUser sends the verified create payload", async () => {
   );
 });
 
+test("marzban createUser keeps metrics in inboundIds but prefers a real inbound for the local primary id", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "metrics-preferred-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ username: "metrics-preferred-user" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "metrics-preferred-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 250,
+              usedBytes: 25,
+              inboundIds: ["vless:METRICS_DUMMY:123", "vless:WS TLS:10002"],
+              inboundId: "vless:METRICS_DUMMY:123",
+              expiresAt: "2030-01-02T03:04:05.000Z"
+            }
+          });
+
+          assert.equal(created.username, "metrics-preferred-user");
+          assert.equal(created.inboundId, "vless:WS TLS:10002");
+          assert.deepEqual(created.inboundIds, ["vless:METRICS_DUMMY:123", "vless:WS TLS:10002"]);
+        }
+      );
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfter = admins.find((admin) => admin.username === "metrics-preferred-owner");
+      assert.equal(ownerAfter.trafficRemainingBytes, 750);
+    }
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("marzban createUser allows metrics-only inbound selection", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "metrics-only-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ username: "metrics-only-user" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "metrics-only-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 100,
+              usedBytes: 0,
+              inboundIds: ["vless:METRICS_DUMMY:123"],
+              inboundId: "vless:METRICS_DUMMY:123",
+              expiresAt: "2030-01-02T03:04:05.000Z"
+            }
+          });
+
+          assert.equal(created.username, "metrics-only-user");
+          assert.equal(created.inboundId, "vless:METRICS_DUMMY:123");
+          assert.deepEqual(created.inboundIds, ["vless:METRICS_DUMMY:123"]);
+        }
+      );
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfter = admins.find((admin) => admin.username === "metrics-only-owner");
+      assert.equal(ownerAfter.trafficRemainingBytes, 900);
+    }
+  );
+  assert.equal(calls.length, 2);
+});
+
 test("marzban createUser fails clearly on remote errors", async () => {
   await withMockFetch(
     [
