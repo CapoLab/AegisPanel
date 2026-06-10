@@ -214,7 +214,7 @@ function dashboard() {
   const totals = state.data?.totals || {};
   const distribution = state.data?.distribution || {};
   return `
-    ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, users, traffic, and operations.")}
+    ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, VPN accounts, traffic, and operations.")}
     <section class="metrics">
       ${metric("Resellers", totals.admins, "superadmin + resellers")}
       ${metric("Panels", totals.panels, "registered upstreams")}
@@ -337,7 +337,7 @@ function users() {
                   <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button>
                 </td>
               </tr>
-            `).join("") || emptyRow(8, "No users yet.")}
+            `).join("") || emptyRow(8, "No VPN accounts yet.")}
           </tbody>
         </table>
       </div>
@@ -506,7 +506,7 @@ function createUserInboundField() {
     return `<p class="alert danger">${esc(state.createUserInboundsError)}</p>`;
   }
   if (!state.createUserInbounds.length) {
-    return `<p class="alert danger">This Marzban panel has no inbounds yet. Load inbounds before creating a user.</p>`;
+    return `<p class="alert danger">This Marzban panel has no inbounds yet. Load inbounds before creating a VPN account.</p>`;
   }
   const grouped = groupMarzbanInbounds(state.createUserInbounds);
   return `
