@@ -10,6 +10,7 @@ const state = {
   logs: [],
   news: [],
   system: null,
+  syncingUserId: null,
   error: "",
   notice: ""
 };
@@ -314,7 +315,12 @@ function users() {
                 <td>${bytes(u.limitBytes)}</td>
                 <td>${dateShort(u.expiresAt)}</td>
                 <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
-                <td class="row-actions"><button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button></td>
+                <td class="row-actions">
+                  <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
+                    ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
+                  </button>
+                  <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button>
+                </td>
               </tr>
             `).join("") || emptyRow(8, "No users yet.")}
           </tbody>
@@ -564,6 +570,30 @@ async function loadPanelInbounds(id) {
   }
 }
 
+async function syncUserTraffic(id) {
+  const previous = state.syncingUserId;
+  state.syncingUserId = id;
+  state.error = "";
+  renderApp();
+  try {
+    const updated = await api(`/api/admin/users/${id}/sync-traffic`, { method: "POST" });
+    state.users = state.users.map((user) => (user.id === id ? { ...user, usedBytes: updated.usedBytes } : user));
+    if (state.data?.users) {
+      state.data = {
+        ...state.data,
+        users: state.users
+      };
+    }
+    state.notice = "User traffic synced";
+    state.error = "";
+  } catch (error) {
+    state.error = error.message || "Traffic sync failed";
+  } finally {
+    state.syncingUserId = previous;
+    renderApp();
+  }
+}
+
 async function deletePanel(id) {
   if (!confirm("Delete this panel?")) return;
   await runAction(() => api(`/api/superadmin/panels/${id}`, { method: "DELETE" }), "Panel deleted");
@@ -618,6 +648,7 @@ window.Aegis = {
   createUser,
   createNews,
   syncPanel,
+  syncUserTraffic,
   loadPanelInbounds,
   deletePanel,
   deleteAdmin,
