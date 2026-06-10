@@ -991,6 +991,16 @@ test("marzban-backed delete removes remote first and then local state", async ()
             json: async () => ({ access_token: "marzban-token" })
           },
           {
+            ok: true,
+            status: 200,
+            json: async () => ({ used_traffic: 250 })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
             ok: false,
             status: 204,
             json: async () => ({})
@@ -1040,19 +1050,22 @@ test("marzban-backed delete removes remote first and then local state", async ()
             session: login.session
           });
           const afterOwner = afterDeleteAdmins.find((admin) => admin.username === "delete-owner");
-          assert.equal(afterOwner.trafficRemainingBytes, 880);
+          assert.equal(afterOwner.trafficRemainingBytes, 750);
         }
       );
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/delete-me");
-  assert.equal(calls[3].options.method, "DELETE");
   assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
+  assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[5].url, "https://marzban.example.com/api/user/delete-me");
+  assert.equal(calls[5].options.method, "DELETE");
+  assert.equal(calls[5].options.headers.authorization, "Bearer marzban-token");
 });
 
 test("marzban delete failure keeps the local user and quota untouched", async () => {
@@ -1139,7 +1152,7 @@ test("marzban delete failure keeps the local user and quota untouched", async ()
             session: login.session
           });
           assert.equal(deleteRes.statusCode, 500);
-          assert.match(deleteRes.json.error, /Marzban delete user failed with HTTP 500/i);
+          assert.match(deleteRes.json.error, /Marzban user lookup failed with HTTP 500/i);
 
           const users = await callApi(handleApi, {
             method: "GET",
@@ -1165,6 +1178,118 @@ test("marzban delete failure keeps the local user and quota untouched", async ()
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/keep-me");
+});
+
+test("marzban traffic lookup failure prevents delete and quota return", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "lookup-fail-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-3", username: "lookup-fail", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "boom" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "lookup-fail",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 300,
+              usedBytes: 120,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const deleteRes = await callApiWithOutcome(handleApi, {
+            method: "DELETE",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session
+          });
+          assert.equal(deleteRes.statusCode, 500);
+          assert.match(deleteRes.json.error, /Marzban user lookup failed with HTTP 500/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          assert.equal(users.some((user) => user.username === "lookup-fail"), true);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const lookupOwner = admins.find((admin) => admin.username === "lookup-fail-owner");
+          assert.equal(lookupOwner.trafficRemainingBytes, 700);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/lookup-fail");
 });
 
 test("repeated failed login attempts eventually return 429", async () => {
@@ -1378,6 +1503,78 @@ test("marzban deleteUser sends the verified delete endpoint and treats 404 as su
   assert.equal(calls[1].url, "https://marzban.example.com/api/user/alice");
   assert.equal(calls[1].options.method, "DELETE");
   assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban getUser looks up remote traffic with Bearer auth", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ used_traffic: 321 })
+      }
+    ],
+    calls,
+    async () => {
+      const result = await marzbanAdapter.getUser(
+        {
+          url: "https://marzban.example.com/",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 10
+        }
+      );
+
+      assert.deepEqual(result, { username: "alice", usedBytes: 321 });
+    }
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user/alice");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban getUser falls back to local usedBytes when remote traffic is missing", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ username: "alice" })
+      }
+    ],
+    [],
+    async () => {
+      const result = await marzbanAdapter.getUser(
+        {
+          url: "https://marzban.example.com",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 77
+        }
+      );
+
+      assert.deepEqual(result, { username: "alice", usedBytes: 77 });
+    }
+  );
 });
 
 test("marzban createUser sends the verified create payload", async () => {

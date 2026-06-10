@@ -35,6 +35,28 @@ function stableInboundId(inbound, fallbackProtocol = "") {
   return [protocol, label, port].filter(Boolean).join(":");
 }
 
+function parseNonNegativeFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function extractUsedBytes(payload) {
+  const candidates = [
+    payload?.used_traffic,
+    payload?.usedTraffic,
+    payload?.data_used,
+    payload?.used,
+    payload?.data?.used_traffic,
+    payload?.data?.usedTraffic,
+    payload?.data?.data_used,
+    payload?.data?.used
+  ];
+  for (const candidate of candidates) {
+    const value = parseNonNegativeFiniteNumber(candidate);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 export function buildClient(panel) {
   const baseUrl = normalizeBaseUrl(panel?.url);
   const username = readCredential(panel, ["username"]);
@@ -197,6 +219,25 @@ export async function deleteUser(panel, user) {
   return { ok: true, username, status: "deleted" };
 }
 
+export async function getUser(panel, user) {
+  const client = buildClient(panel);
+  const username = String(user?.username ?? "").trim();
+  if (!username) fail(400, "Marzban username is required");
+  const accessToken = await authenticate(client);
+  const response = await fetch(`${client.baseUrl}/api/user/${encodeURIComponent(username)}`, {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (!response.ok) {
+    fail(response.status || 502, `Marzban user lookup failed with HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const usedBytes = extractUsedBytes(payload);
+  return {
+    username,
+    usedBytes: usedBytes ?? (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0)
+  };
+}
+
 export const marzbanAdapter = {
   type: "marzban",
   label: "Marzban",
@@ -221,6 +262,9 @@ export const marzbanAdapter = {
   },
   async deleteUser(panel, user) {
     return deleteUser(panel, user);
+  },
+  async getUser(panel, user) {
+    return getUser(panel, user);
   },
   async syncUserTraffic() {
     reject("syncUserTraffic");

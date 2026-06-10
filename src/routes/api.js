@@ -435,10 +435,20 @@ export async function handleApi(req, res, route) {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const panel = store.find("panels", user.panelId);
+    let usedBytesForReturn = finiteQuotaBytes(user.usedBytes) ?? 0;
     if (panel?.type === "marzban") {
       const adapter = adapterFor(panel.type);
-      if (!adapter || typeof adapter.deleteUser !== "function") {
+      if (!adapter || typeof adapter.deleteUser !== "function" || typeof adapter.getUser !== "function") {
         return sendJson(res, 501, { ok: false, error: "Real user deletion is not available for this panel type yet" });
+      }
+      try {
+        const remoteUser = await adapter.getUser(panel, user);
+        usedBytesForReturn = finiteQuotaBytes(remoteUser?.usedBytes) ?? usedBytesForReturn;
+      } catch (error) {
+        return sendJson(res, error.status || 502, {
+          ok: false,
+          error: error.message || "Marzban user lookup failed"
+        });
       }
       try {
         await adapter.deleteUser(panel, user);
@@ -452,7 +462,7 @@ export async function handleApi(req, res, route) {
     const owner = store.find("admins", user.ownerAdminId);
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
     const limitBytes = finiteQuotaBytes(user.limitBytes) ?? 0;
-    const usedBytes = finiteQuotaBytes(user.usedBytes) ?? 0;
+    const usedBytes = usedBytesForReturn;
     const reservedBytes = finiteQuotaBytes(user.reservedBytes) ?? limitBytes;
     const returned = Math.min(Math.max(limitBytes - usedBytes, 0), reservedBytes);
     if (owner?.deleteReturnTraffic && ownerRemainingBytes !== null && returned > 0) {
