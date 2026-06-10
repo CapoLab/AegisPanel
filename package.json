@@ -1,0 +1,15 @@
+{
+  "name": "aegis-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Original commercial-ready control platform with role-based operations, panel adapters, traffic accounting, licensing, and Docker-first deployment.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,11 @@
+services:
+  aegis-panel:
+    build: .
+    container_name: aegis-panel
+    restart: unless-stopped
+    ports:
+      - "${AEGIS_PORT:-8080}:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
