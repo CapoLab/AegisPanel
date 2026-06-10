@@ -361,6 +361,77 @@ small {
   color: var(--muted);
 }
 
+.compact-head {
+  margin-bottom: 10px;
+}
+
+.compact-head h4 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.inbound-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.inbound-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.inbound-group-title {
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.inbound-checklist {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.inbound-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.inbound-option.selected {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.inbound-option input {
+  margin-top: 2px;
+}
+
+.inbound-option strong,
+.inbound-option small {
+  display: block;
+}
+
+.inbound-option strong {
+  line-height: 1.35;
+}
+
+.inbound-option small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
 .form {
   display: grid;
   gap: 12px;
@@ -470,6 +541,10 @@ small {
   max-width: 100%;
 }
 
+.modal .alert {
+  margin: 0;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.86rem;
@@ -523,6 +598,10 @@ small {
 
   .inbound-label {
     max-width: 200px;
+  }
+
+  .inbound-option {
+    grid-template-columns: 18px minmax(0, 1fr);
   }
 }
 
