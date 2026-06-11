@@ -112,6 +112,7 @@ function buildPublicSubscriptionUrl(panel, user) {
 function publicUser(user) {
   const safe = { ...user };
   safe.inboundMode = normalizeInboundMode(safe.inboundMode);
+  safe.ownerUsername = store.find("admins", safe.ownerAdminId)?.username || null;
   if (Array.isArray(safe.inboundIds) && safe.inboundIds.length > 0) {
     safe.inboundId = preferredInboundId(safe.inboundIds, safe.inboundId);
   } else if (safe.inboundId) {
@@ -208,6 +209,33 @@ function canDeleteAdmin(actor, targetAdmin, superadminCount) {
     return { status: 409, error: "At least one superadmin must remain" };
   }
   return null;
+}
+
+async function deleteUsersOwnedByAdmin(actor, targetAdmin) {
+  const ownedUsers = store.list("users").filter((user) => user.ownerAdminId === targetAdmin.id);
+  const marzbanFailures = [];
+  for (const user of ownedUsers) {
+    const panel = store.find("panels", user.panelId);
+    if (panel?.type !== "marzban") continue;
+    const adapter = adapterFor(panel.type);
+    if (!adapter || typeof adapter.deleteUser !== "function") {
+      marzbanFailures.push(user.id);
+      continue;
+    }
+    try {
+      await adapter.deleteUser(panel, user);
+    } catch {
+      marzbanFailures.push(user.id);
+    }
+  }
+  if (marzbanFailures.length > 0) {
+    const error = new Error("Cannot delete reseller because one or more remote users could not be deleted.");
+    error.status = 502;
+    throw error;
+  }
+  for (const user of ownedUsers) {
+    store.remove("users", user.id);
+  }
 }
 
 function requireAuth(req, role) {
@@ -459,6 +487,11 @@ export async function handleApi(req, res, route) {
     const superadminCount = store.list("admins").filter((admin) => admin.role === "superadmin" && admin.active).length;
     const blocked = canDeleteAdmin(superadmin, targetAdmin, superadminCount);
     if (blocked) return sendJson(res, blocked.status, { ok: false, error: blocked.error });
+    try {
+      await deleteUsersOwnedByAdmin(superadmin, targetAdmin);
+    } catch (error) {
+      return sendJson(res, error.status || 502, { ok: false, error: error.message });
+    }
     const removed = store.remove("admins", adminId.id);
     store.audit(superadmin, "admin.delete", adminId.id);
     return sendJson(res, removed ? 200 : 404, { ok: removed });

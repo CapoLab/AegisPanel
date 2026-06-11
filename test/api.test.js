@@ -5025,8 +5025,8 @@ test("reseller cannot load inbounds for an assigned marzban panel", async () => 
           url: "https://marzban.example.com/",
           username: "marzban-admin",
           secret: "marzban-pass"
-        }
-      });
+          }
+        });
       const reseller = await callApi(handleApi, {
         method: "POST",
         pathname: "/api/superadmin/admins",
@@ -5411,6 +5411,7 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
             }
           });
           assert.equal(created.subscriptionUrl, "https://marzban.example.com/sub/sub-client-a");
+          assert.equal(created.ownerUsername, ownerA.username);
 
           const ownerAUsers = await callApi(handleApi, {
             method: "GET",
@@ -5419,6 +5420,7 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           });
           const storedA = ownerAUsers.find((user) => user.username === "sub-client-a");
           assert.equal(storedA.subscriptionUrl, "https://marzban.example.com/sub/sub-client-a");
+          assert.equal(storedA.ownerUsername, ownerA.username);
 
           await callApi(handleApi, {
             method: "POST",
@@ -5759,6 +5761,398 @@ test("marzban sync does not claim success before the adapter is implemented", as
       });
       assert.equal(res.statusCode, 501);
       assert.match(res.json.error, /Marzban sync is not implemented yet/);
+    }
+  );
+});
+
+test("superadmin deleting a reseller cascades owned Marzban users and allows username reuse", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Cascade Panel",
+          type: "marzban",
+          url: "https://cascade.example.com",
+          subscriptionUrl: "https://cascade.example.com",
+          username: "panel-user",
+          secret: "panel-secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "cascade-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+
+      await withMockFetch(
+        [
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 201, json: async () => ({ username: "cascade-a" }) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 201, json: async () => ({ username: "cascade-b" }) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 204, json: async () => ({}) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 204, json: async () => ({}) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 201, json: async () => ({ username: "cascade-a" }) }
+        ],
+        calls,
+        async () => {
+          await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "cascade-a",
+              panelId: panel.id,
+              ownerAdminId: reseller.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "first",
+              inboundIds: ["vless:Cascade WS TLS:10002"]
+            }
+          });
+          await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "cascade-b",
+              panelId: panel.id,
+              ownerAdminId: reseller.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "second",
+              inboundIds: ["vless:Cascade WS TLS:10002"]
+            }
+          });
+
+          const deleteReseller = await callApi(handleApi, {
+            method: "DELETE",
+            pathname: `/api/superadmin/admins/${reseller.id}`,
+            session: login.session
+          });
+          assert.equal(deleteReseller.ok, true);
+
+          assert.equal(store.find("admins", reseller.id), undefined);
+          assert.equal(store.list("users").some((user) => user.ownerAdminId === reseller.id), false);
+
+          const recreated = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "cascade-a",
+              panelId: panel.id,
+              ownerAdminId: login.admin.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              inboundIds: ["vless:Cascade WS TLS:10002"]
+            }
+          });
+          assert.equal(recreated.username, "cascade-a");
+        }
+      );
+    }
+  );
+  assert.equal(calls.filter((call) => call.options?.method === "DELETE").length, 2);
+});
+
+test("remote 404 is treated as success when cascading reseller users", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Missing User Panel",
+          type: "marzban",
+          url: "https://missing-user.example.com",
+          subscriptionUrl: "https://missing-user.example.com",
+          username: "panel-user",
+          secret: "panel-secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "missing-user-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+
+      await withMockFetch(
+        [
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 201, json: async () => ({ username: "missing-user" }) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: false, status: 404, json: async () => ({ detail: "missing" }) }
+        ],
+        [],
+        async () => {
+          await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "missing-user",
+              panelId: panel.id,
+              ownerAdminId: reseller.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "missing",
+              inboundIds: ["vless:Missing WS TLS:10002"]
+            }
+          });
+
+          const deleted = await callApi(handleApi, {
+            method: "DELETE",
+            pathname: `/api/superadmin/admins/${reseller.id}`,
+            session: login.session
+          });
+          assert.equal(deleted.ok, true);
+          assert.equal(store.find("admins", reseller.id), undefined);
+          assert.equal(store.list("users").some((user) => user.username === "missing-user"), false);
+        }
+      );
+    }
+  );
+});
+
+test("remote delete failure blocks reseller deletion and preserves local users", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Fail Delete Panel",
+          type: "marzban",
+          url: "https://fail-delete.example.com",
+          subscriptionUrl: "https://fail-delete.example.com",
+          username: "panel-user",
+          secret: "panel-secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "fail-delete-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+
+      await withMockFetch(
+        [
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: true, status: 201, json: async () => ({ username: "fail-delete-user" }) },
+          { ok: true, status: 200, json: async () => ({ access_token: "marzban-token" }) },
+          { ok: false, status: 500, json: async () => ({ detail: "boom" }) }
+        ],
+        [],
+        async () => {
+          await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "fail-delete-user",
+              panelId: panel.id,
+              ownerAdminId: reseller.id,
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "keep",
+              inboundIds: ["vless:Fail WS TLS:10002"]
+            }
+          });
+
+          const blocked = await callApiWithOutcome(handleApi, {
+            method: "DELETE",
+            pathname: `/api/superadmin/admins/${reseller.id}`,
+            session: login.session
+          });
+          assert.equal(blocked.statusCode, 502);
+          assert.match(blocked.json.error, /Cannot delete reseller because one or more remote users could not be deleted/i);
+          assert.ok(store.find("admins", reseller.id));
+          assert.equal(store.list("users").some((user) => user.username === "fail-delete-user"), true);
+        }
+      );
+    }
+  );
+});
+
+test("superadmin users api exposes owner usernames and orphaned users are marked missing", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "owner-visible",
+          password: "owner-pass",
+          role: "admin",
+          trafficLimitBytes: 1000
+        }
+      });
+      const orphanOwner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "orphan-owner",
+          password: "orphan-pass",
+          role: "admin",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Visibility Panel",
+          type: "tx-ui",
+          url: "https://visibility.example.com"
+        }
+      });
+      const ownerUser = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "visible-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 10,
+          expiresAt: "2030-01-02T23:59:59.000Z",
+          note: "owner visible"
+        }
+      });
+      assert.equal(ownerUser.ownerUsername, owner.username);
+
+      const orphanUserRecord = store.list("users").find((user) => user.username === "visible-user");
+      store.update("users", orphanUserRecord.id, { ownerAdminId: "missing-owner" });
+
+      const users = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: login.session
+      });
+      const visibleUser = users.find((user) => user.username === "visible-user");
+      assert.equal(visibleUser.ownerUsername, null);
+
+      const ownerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "owner-pass" }
+      });
+      const ownerUsers = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: ownerLogin.session
+      });
+      assert.equal(ownerUsers.some((user) => user.username === "visible-user"), false);
+
+      const orphanedUser = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "orphaned-user",
+          panelId: panel.id,
+          ownerAdminId: orphanOwner.id,
+          limitBytes: 10,
+          expiresAt: "2030-01-02T23:59:59.000Z",
+          note: "orphan owner"
+        }
+      });
+      assert.equal(orphanedUser.ownerUsername, orphanOwner.username);
+      store.update("admins", orphanOwner.id, { active: false });
+      store.remove("admins", orphanOwner.id);
+      const refreshed = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: login.session
+      });
+      const orphanedVisible = refreshed.find((user) => user.username === "orphaned-user");
+      assert.equal(orphanedVisible.ownerUsername, null);
     }
   );
 });

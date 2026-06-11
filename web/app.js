@@ -631,11 +631,12 @@ function users() {
       <p class="muted section-note">VPN accounts are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>VPN Account</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>VPN Account</th><th>Owner / Reseller</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 ${state.users.map((u) => `
                   <tr>
                     <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
+                    <td>${esc(u.ownerUsername || "Orphaned")}</td>
                     <td>${esc(panelName(u.panelId))}</td>
                     <td>${esc(vpnAccountInboundSummary(u))}</td>
                     <td>${bytes(u.usedBytes)}</td>
@@ -644,7 +645,7 @@ function users() {
                     <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                     <td class="row-actions icon-actions">${renderUserRowActions(u)}</td>
                   </tr>
-                `).join("") || emptyRow(8, "No VPN accounts yet.")}
+                `).join("") || emptyRow(9, "No VPN accounts yet.")}
               </tbody>
             </table>
       </div>
