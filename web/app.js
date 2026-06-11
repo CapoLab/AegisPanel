@@ -1066,13 +1066,14 @@ function createUserInboundField() {
   if (!isMarzban) {
     return `<label>Inbound<input name="inboundId" placeholder="default" value="${esc(state.createUserInboundId || "")}" /></label>`;
   }
+  const inbounds = realMarzbanInbounds(state.createUserInbounds);
   return renderMarzbanInboundPicker({
     title: "Inbounds",
-    inbounds: state.createUserInbounds,
+    inbounds,
     selectedIds: state.createUserInboundIds,
     loading: state.createUserInboundsLoading,
     error: state.createUserInboundsError,
-    emptyMessage: "This Marzban panel has no inbounds yet. Load inbounds before creating a VPN account.",
+    emptyMessage: "This Marzban panel has no selectable real inbounds yet. Load inbounds before creating a VPN account.",
     toggleAction: "toggleMarzbanInboundSelection",
     selectAllAction: "selectAllMarzbanInbounds",
     clearAction: "clearMarzbanInbounds"
@@ -1125,6 +1126,10 @@ function isDummyOrMetricsInbound(inbound) {
   return /dummy|metrics/i.test(normalizeInboundSearchText(`${inbound?.label || ""} ${inbound?.id || ""}`));
 }
 
+function realMarzbanInbounds(inbounds) {
+  return (inbounds || []).filter((inbound) => !isDummyOrMetricsInbound(inbound));
+}
+
 function vpnAccountInboundMode(user) {
   return user?.inboundMode === "all" ? "All" : "Custom";
 }
@@ -1168,7 +1173,7 @@ function groupMarzbanInbounds(inbounds) {
 }
 
 function normalMarzbanInboundIds(inbounds) {
-  return inbounds.map((inbound) => inbound.id);
+  return realMarzbanInbounds(inbounds).map((inbound) => inbound.id);
 }
 
 function preferredMarzbanInboundId(inboundIds, fallbackId = "") {
@@ -1252,7 +1257,7 @@ function protocolKey(value) {
 
 function editUserProtocolInbounds(protocol) {
   const key = protocolKey(protocol);
-  return state.editUserInbounds.filter((inbound) => protocolKey(inbound.protocol) === key);
+  return realMarzbanInbounds(state.editUserInbounds).filter((inbound) => protocolKey(inbound.protocol) === key);
 }
 
 function editUserProtocolSelectedCount(protocolInbounds) {
@@ -1493,7 +1498,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
     state.createUserInbounds = rows;
     state.createUserInboundIds = normalMarzbanInboundIds(rows);
     state.createUserInboundId = preferredMarzbanInboundId(state.createUserInboundIds);
-    state.createUserInboundsError = "";
+    state.createUserInboundsError = state.createUserInboundIds.length > 0 ? "" : "This Marzban panel has no selectable real inbounds yet.";
   } catch (error) {
     state.createUserInbounds = [];
     state.createUserInboundId = "";
@@ -1605,9 +1610,11 @@ async function createUser(event) {
       if (state.createUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
-      const selectedInbounds = state.createUserInbounds.filter((inbound) => state.createUserInboundIds.includes(inbound.id));
+      const selectableInbounds = realMarzbanInbounds(state.createUserInbounds);
+      const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
+      const selectedInbounds = selectableInbounds.filter((inbound) => state.createUserInboundIds.includes(inbound.id));
       if (!selectedInbounds.length) {
-        throw new Error("Select a Marzban inbound before creating the VPN account.");
+        throw new Error("Select a real inbound, not a metrics placeholder.");
       }
       const expiresAt = resolveCreateUserExpiry(form);
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
@@ -1621,7 +1628,7 @@ async function createUser(event) {
           expiresAt,
           inboundId: preferredMarzbanInboundId(inboundIds),
           inboundIds,
-          inboundMode: inboundModeFromSelection(inboundIds, state.createUserInbounds.map((inbound) => inbound.id)),
+          inboundMode: inboundModeFromSelection(inboundIds, selectableInboundIds),
           note: form.get("note") || "",
           active: form.has("active")
         }
@@ -1858,7 +1865,7 @@ function toggleEditMarzbanInboundSelection(id, checked) {
 }
 
 function selectAllEditMarzbanInbounds() {
-  state.editUserInboundIds = state.editUserInbounds.map((inbound) => inbound.id);
+  state.editUserInboundIds = normalMarzbanInboundIds(state.editUserInbounds);
   state.editUserError = "";
   refreshEditUserInboundField();
   refreshEditUserError();
@@ -1928,11 +1935,12 @@ async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
   try {
     const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
     state.editUserInbounds = rows;
+    const selectable = realMarzbanInbounds(rows);
     const existing = state.editUserInboundIds.length ? state.editUserInboundIds : [state.editUserInboundId].filter(Boolean);
-    const selected = existing.filter((id) => rows.some((row) => row.id === id));
-    state.editUserInboundIds = selected.length ? selected : rows.map((row) => row.id);
+    const selected = existing.filter((id) => selectable.some((row) => row.id === id));
+    state.editUserInboundIds = selected.length ? selected : selectable.map((row) => row.id);
     state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, state.editUserInboundId);
-    state.editUserInboundsError = "";
+    state.editUserInboundsError = state.editUserInboundIds.length > 0 ? "" : "This Marzban panel has no selectable real inbounds yet.";
   } catch (error) {
     state.editUserInbounds = [];
     state.editUserInboundIds = [];
@@ -1960,9 +1968,11 @@ async function saveEditUser(event) {
       if (state.editUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
-      const selectedInbounds = state.editUserInbounds.filter((inbound) => state.editUserInboundIds.includes(inbound.id));
+      const selectableInbounds = realMarzbanInbounds(state.editUserInbounds);
+      const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
+      const selectedInbounds = selectableInbounds.filter((inbound) => state.editUserInboundIds.includes(inbound.id));
       if (!selectedInbounds.length) {
-        throw new Error("Select a Marzban inbound before saving the VPN account.");
+        throw new Error("Select a real inbound, not a metrics placeholder.");
       }
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
       const expiresAt = resolveEditUserExpiry(form);
@@ -1971,7 +1981,7 @@ async function saveEditUser(event) {
         body: {
           inboundIds,
           inboundId: preferredMarzbanInboundId(inboundIds),
-          inboundMode: inboundModeFromSelection(inboundIds, state.editUserInbounds.map((inbound) => inbound.id)),
+          inboundMode: inboundModeFromSelection(inboundIds, selectableInboundIds),
           limitBytes: gbToBytes(form.get("limitGb")),
           expiresAt,
           note: form.get("note") || "",

@@ -333,6 +333,10 @@ function isDummyOrMetricsInboundId(value) {
   return /dummy|metrics/i.test(normalizeInboundSearchText(value));
 }
 
+function hasRealInboundSelection(inboundIds) {
+  return Array.isArray(inboundIds) && inboundIds.some((value) => typeof value === "string" && value.trim() && !isDummyOrMetricsInboundId(value));
+}
+
 function preferredInboundId(inboundIds, fallbackInboundId = "") {
   const selected = Array.isArray(inboundIds) ? inboundIds.filter((value) => typeof value === "string" && value.trim()) : [];
   const real = selected.find((value) => !isDummyOrMetricsInboundId(value));
@@ -756,6 +760,9 @@ export async function handleApi(req, res, route) {
       const rows = await adapter.listInbounds(panel);
       resolvedInboundIds = rows.map((row) => row.id).filter((value) => typeof value === "string" && value.trim());
     }
+    if (resolvedInboundIds.length > 0 && !hasRealInboundSelection(resolvedInboundIds)) {
+      return sendJson(res, 400, { ok: false, error: "Select a real inbound, not a metrics placeholder." });
+    }
     if (resellerMarzbanInbounds && resolvedInboundIds.length === 0) {
       return sendJson(res, 400, { ok: false, error: "No Marzban inbounds available for this panel" });
     }
@@ -865,6 +872,9 @@ export async function handleApi(req, res, route) {
     const panel = store.find("panels", user.panelId);
     const inboundIds = selectedInboundIdsFromBody(body, user.inboundIds || [user.inboundId]);
     const primaryInboundId = preferredInboundId(inboundIds, body.inboundId ?? user.inboundId);
+    if (inboundIds.length > 0 && !hasRealInboundSelection(inboundIds)) {
+      return sendJson(res, 400, { ok: false, error: "Select a real inbound, not a metrics placeholder." });
+    }
     const oldReservedBytes = Math.max(0, finiteQuotaBytes(user.reservedBytes) ?? finiteQuotaBytes(user.limitBytes) ?? 0);
     const oldLimitBytes = Math.max(0, finiteQuotaBytes(user.limitBytes) ?? 0);
     const usedBytes = Math.max(0, finiteQuotaBytes(user.usedBytes) ?? 0);

@@ -4442,7 +4442,7 @@ test("marzban createUser prefers a real inbound even when styled metrics text is
   );
 });
 
-test("marzban createUser allows metrics-only inbound selection", async () => {
+test("marzban createUser rejects metrics-only inbound selection before remote create", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -4481,6 +4481,76 @@ test("marzban createUser allows metrics-only inbound selection", async () => {
         }
       });
 
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "metrics-only-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 100,
+          usedBytes: 0,
+          inboundIds: ["vless:METRICS_DUMMY:123"],
+          inboundId: "vless:METRICS_DUMMY:123",
+          expiresAt: "2030-01-02T03:04:05.000Z"
+        }
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Select a real inbound, not a metrics placeholder\./i);
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfter = admins.find((admin) => admin.username === "metrics-only-owner");
+      assert.equal(ownerAfter.trafficRemainingBytes, 1000);
+    }
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("marzban-backed user update rejects metrics-only inbound selection before remote update", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "metrics-only-edit-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
       await withMockFetch(
         [
           {
@@ -4491,17 +4561,7 @@ test("marzban createUser allows metrics-only inbound selection", async () => {
           {
             ok: true,
             status: 201,
-            json: async () => ({ username: "metrics-only-user" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ username: "metrics-only-user", subscription_url: "https://marzban.example.com/sub/metrics-only-user" })
+            json: async () => ({ username: "metrics-only-edit-user", subscription_url: "https://marzban.example.com/sub/metrics-only-edit-user" })
           }
         ],
         calls,
@@ -4511,34 +4571,34 @@ test("marzban createUser allows metrics-only inbound selection", async () => {
             pathname: "/api/admin/users",
             session: login.session,
             body: {
-              username: "metrics-only-user",
+              username: "metrics-only-edit-user",
               panelId: panel.id,
               ownerAdminId: owner.id,
               limitBytes: 100,
               usedBytes: 0,
-              inboundIds: ["vless:METRICS_DUMMY:123"],
-              inboundId: "vless:METRICS_DUMMY:123",
+              inboundIds: ["vless:WS TLS:10002"],
+              inboundId: "vless:WS TLS:10002",
               expiresAt: "2030-01-02T03:04:05.000Z"
             }
           });
 
-          assert.equal(created.username, "metrics-only-user");
-          assert.equal(created.inboundId, "vless:METRICS_DUMMY:123");
-          assert.equal(created.inboundMode, "custom");
-          assert.deepEqual(created.inboundIds, ["vless:METRICS_DUMMY:123"]);
+          const res = await callApiWithOutcome(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session,
+            body: {
+              inboundIds: ["vless:METRICS_DUMMY:123"],
+              inboundId: "vless:METRICS_DUMMY:123"
+            }
+          });
+
+          assert.equal(res.statusCode, 400);
+          assert.match(res.json.error, /Select a real inbound, not a metrics placeholder\./i);
         }
       );
-
-      const admins = await callApi(handleApi, {
-        method: "GET",
-        pathname: "/api/superadmin/admins",
-        session: login.session
-      });
-      const ownerAfter = admins.find((admin) => admin.username === "metrics-only-owner");
-      assert.equal(ownerAfter.trafficRemainingBytes, 900);
     }
   );
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 2);
 });
 
 test("marzban createUser stores inboundMode all when all selected inbounds are sent", async () => {
@@ -6631,6 +6691,14 @@ test("superadmin sidebar and users copy use customer-user wording", async () => 
   assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);
   assert.match(usersSource, /<th>User<\/th>/);
   assert.match(usersSource, /No users yet\./);
+});
+
+test("create and edit user forms hide metrics placeholders from selectable Marzban choices", async () => {
+  const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  assert.match(source, /realMarzbanInbounds\(state\.createUserInbounds\)/);
+  assert.match(source, /realMarzbanInbounds\(state\.editUserInbounds\)/);
+  assert.match(source, /Select a real inbound, not a metrics placeholder\./);
+  assert.match(source, /state\.editUserInboundsError = state\.editUserInboundIds\.length > 0 \? "" : "This Marzban panel has no selectable real inbounds yet\.";/);
 });
 
 test("a superadmin cannot delete itself", async () => {
