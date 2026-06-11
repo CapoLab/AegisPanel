@@ -57,16 +57,7 @@ function extractUsedBytes(payload) {
   return null;
 }
 
-function readPath(payload, path) {
-  let node = payload;
-  for (const key of path) {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return null;
-    node = node[key];
-  }
-  return typeof node === "string" ? node.trim() : null;
-}
-
-function isHttpSubscriptionUrl(value) {
+function isHttpUrl(value) {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
   if (!trimmed) return false;
@@ -78,27 +69,69 @@ function isHttpSubscriptionUrl(value) {
   }
 }
 
-function resolveSubscriptionUrl(raw, panel) {
-  if (isHttpSubscriptionUrl(raw)) return raw.trim();
+function readPath(payload, path) {
+  let node = payload;
+  for (const key of path) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+    node = node[key];
+  }
+  return typeof node === "string" ? node.trim() : null;
+}
+
+function normalizeSubscriptionPath(value) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return "sub";
+  return trimmed.replace(/^\/+|\/+$/g, "") || "sub";
+}
+
+function normalizePanelSubscriptionPrefix(panel) {
+  if (!isHttpUrl(panel?.subscriptionUrl)) return null;
+  return panel.subscriptionUrl.trim().replace(/\/+$/, "");
+}
+
+function resolveSafeSubscriptionUrl(raw, panel) {
+  if (isHttpUrl(raw)) return raw.trim();
   const trimmed = typeof raw === "string" ? raw.trim() : "";
   if (!trimmed || !/^\/(?:sub|subscription)(?:[/?#]|$)/i.test(trimmed)) return null;
-  const base = typeof panel?.subscriptionUrl === "string" && panel.subscriptionUrl.trim()
-    ? panel.subscriptionUrl.trim()
-    : typeof panel?.url === "string" && panel.url.trim()
-      ? panel.url.trim()
-      : "";
+  const base = normalizePanelSubscriptionPrefix(panel) || (isHttpUrl(panel?.url) ? panel.url.trim().replace(/\/+$/, "") : "");
   if (!base) return null;
   try {
     const baseUrl = new URL(base);
     if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") return null;
     const resolved = new URL(trimmed, baseUrl);
-    return resolved.protocol === "http:" || resolved.protocol === "https:" ? resolved.toString() : null;
+    return isHttpUrl(resolved.toString()) ? resolved.toString() : null;
   } catch {
     return null;
   }
 }
 
-function extractSubscriptionUrl(payload, panel) {
+function extractSubscriptionIdentifier(payload, user) {
+  const candidates = [
+    user?.subscriptionId,
+    payload?.subscriptionId,
+    payload?.data?.subscriptionId,
+    payload?.subscription_id,
+    payload?.data?.subscription_id,
+    user?.username,
+    payload?.username,
+    payload?.data?.username
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
+  }
+  return "";
+}
+
+function buildFallbackSubscriptionUrl(panel, identifier) {
+  const prefix = normalizePanelSubscriptionPrefix(panel);
+  const path = normalizeSubscriptionPath(panel?.subscriptionPath);
+  const token = typeof identifier === "string" ? identifier.trim() : "";
+  if (!prefix || !token) return null;
+  return `${prefix}/${path}/${encodeURIComponent(token)}`;
+}
+
+function extractSubscriptionUrl(payload, panel, user = null) {
   const candidates = [
     ["subscription_url"],
     ["subscriptionUrl"],
@@ -126,10 +159,10 @@ function extractSubscriptionUrl(payload, panel) {
     ["data", "links", "subLink"]
   ];
   for (const path of candidates) {
-    const subscriptionUrl = resolveSubscriptionUrl(readPath(payload, path), panel);
+    const subscriptionUrl = resolveSafeSubscriptionUrl(readPath(payload, path), panel);
     if (subscriptionUrl) return subscriptionUrl;
   }
-  return null;
+  return buildFallbackSubscriptionUrl(panel, extractSubscriptionIdentifier(payload, user ?? payload));
 }
 
 export function buildClient(panel) {
@@ -273,7 +306,8 @@ export async function createUser(panel, user) {
     id: payload?.id ?? payload?.data?.id ?? payload?.username ?? user?.username ?? null,
     username: payload?.username ?? payload?.data?.username ?? user?.username ?? null,
     status: payload?.status ?? payload?.data?.status ?? "active",
-    subscriptionUrl: extractSubscriptionUrl(payload, panel)
+    subscriptionId: extractSubscriptionIdentifier(payload, user),
+    subscriptionUrl: extractSubscriptionUrl(payload, panel, user)
   };
 }
 
@@ -355,7 +389,8 @@ export async function getUser(panel, user) {
   return {
     username,
     usedBytes: usedBytes ?? (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0),
-    subscriptionUrl: extractSubscriptionUrl(payload, panel)
+    subscriptionId: extractSubscriptionIdentifier(payload, user),
+    subscriptionUrl: extractSubscriptionUrl(payload, panel, user)
   };
 }
 

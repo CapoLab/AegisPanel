@@ -745,7 +745,10 @@ function showPanelForm() {
       <label>Name<input name="name" required placeholder="Edge Tehran 01" /></label>
       <label>Type<select name="type">${(state.meta?.panelTypes || []).map((p) => `<option value="${p.type}">${p.label}</option>`).join("")}</select></label>
       <label>Panel URL<input name="url" required placeholder="https://panel.example.com" /></label>
-      <label>Subscription URL<input name="subscriptionUrl" placeholder="https://panel.example.com/sub" /></label>
+      <label>Subscription URL Prefix<input name="subscriptionUrl" placeholder="https://panel.example.com" /></label>
+      <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_URL_PREFIX</small>
+      <label>Subscription Path<input name="subscriptionPath" placeholder="sub" /></label>
+      <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_PATH. Default: sub</small>
       <label>Username<input name="username" placeholder="panel admin, if needed" /></label>
       <label>Secret / API key<input name="secret" placeholder="stored locally for connector use" /></label>
       <button class="primary" type="submit">Create panel</button>

@@ -261,6 +261,7 @@ test("past expiry is rejected on create before remote calls", async () => {
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -415,6 +416,7 @@ test("editing traffic limit above reseller remaining quota is rejected before Ma
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -477,7 +479,7 @@ test("editing traffic limit above reseller remaining quota is rejected before Ma
       );
     }
   );
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 2);
 });
 
 test("editing traffic limit below usedBytes is rejected", async () => {
@@ -565,6 +567,7 @@ test("past expiry is rejected on edit before Marzban remote update", async () =>
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -630,7 +633,7 @@ test("past expiry is rejected on edit before Marzban remote update", async () =>
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 2);
 });
 
 test("marzban remote update failure leaves local limitBytes, reservedBytes, and owner quota unchanged", async () => {
@@ -667,6 +670,7 @@ test("marzban remote update failure leaves local limitBytes, reservedBytes, and 
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -688,16 +692,6 @@ test("marzban remote update failure leaves local limitBytes, reservedBytes, and 
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-edit-rollback", username: "edit-rollback", status: "active" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ username: "edit-rollback", subscription_url: "https://marzban.example.com/sub/edit-rollback" })
           },
           {
             ok: true,
@@ -758,7 +752,7 @@ test("marzban remote update failure leaves local limitBytes, reservedBytes, and 
     }
   );
 
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -1766,6 +1760,7 @@ test("marzban user creation rolls back on remote failure", async () => {
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -2428,6 +2423,7 @@ test("marzban-backed delete removes remote first and then local state", async ()
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -2444,16 +2440,6 @@ test("marzban-backed delete removes remote first and then local state", async ()
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-1", username: "delete-me", status: "active" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ username: "delete-me", subscription_url: "https://marzban.example.com/sub/delete-me" })
           },
           {
             ok: true,
@@ -2526,7 +2512,7 @@ test("marzban-backed delete removes remote first and then local state", async ()
     }
   );
 
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -2534,11 +2520,8 @@ test("marzban-backed delete removes remote first and then local state", async ()
   assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
   assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[5].url, "https://marzban.example.com/api/user/delete-me");
+  assert.equal(calls[5].options.method, "DELETE");
   assert.equal(calls[5].options.headers.authorization, "Bearer marzban-token");
-  assert.equal(calls[6].url, "https://marzban.example.com/api/admin/token");
-  assert.equal(calls[7].url, "https://marzban.example.com/api/user/delete-me");
-  assert.equal(calls[7].options.method, "DELETE");
-  assert.equal(calls[7].options.headers.authorization, "Bearer marzban-token");
 });
 
 test("marzban delete failure keeps the local user and quota untouched", async () => {
@@ -3289,6 +3272,7 @@ test("panel credentials are stripped from api responses", async () => {
     },
     async () => {
       const { handleApi } = await importFresh("../src/routes/api.js");
+      const { store } = await import("../src/storage/store.js");
       const login = await callApi(handleApi, {
         method: "POST",
         pathname: "/api/auth/login",
@@ -3356,6 +3340,52 @@ test("panel credentials are stripped from api responses", async () => {
       assert.equal(panelList[0].secret, undefined);
       assert.equal(panelList[0].apiKey, undefined);
 
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session,
+        body: {
+          username: "subscription-owner",
+          password: "owner-pass",
+          trafficLimitBytes: 100
+        }
+      });
+      const rawPanel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session,
+        body: {
+          name: "Raw Subscription Panel",
+          type: "tx-ui",
+          url: "https://panel.example.com"
+        }
+      });
+      const rawUser = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session,
+        body: {
+          username: "raw-sub-user",
+          panelId: rawPanel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 10,
+          usedBytes: 0,
+          inboundId: "default",
+          expiresAt: "2030-01-02T00:00:00.000Z"
+        }
+      });
+      store.update("users", rawUser.id, {
+        subscriptionUrl: "vless://example@127.0.0.1:123?path=%2F"
+      });
+
+      const users = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session
+      });
+      const sanitizedUser = users.find((user) => user.username === "raw-sub-user");
+      assert.equal(sanitizedUser.subscriptionUrl, null);
+
       const backup = await callApi(handleApi, {
         method: "GET",
         pathname: "/api/superadmin/backup",
@@ -3410,6 +3440,7 @@ test("marzban syncUserTraffic uses the remote user lookup endpoint", async () =>
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 222,
+        subscriptionId: "alice",
         subscriptionUrl: null
       });
     }
@@ -3452,6 +3483,7 @@ test("marzban syncUserTraffic falls back to local usedBytes when remote traffic 
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 55,
+        subscriptionId: "alice",
         subscriptionUrl: null
       });
     }
@@ -3532,6 +3564,7 @@ test("marzban getUser looks up remote traffic with Bearer auth", async () => {
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 321,
+        subscriptionId: "alice",
         subscriptionUrl: "https://marzban.example.com/sub/alice"
       });
     }
@@ -3565,6 +3598,7 @@ test("marzban getUser ignores raw config links when resolving subscriptionUrl", 
       const result = await marzbanAdapter.getUser(
         {
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "admin",
           password: "secret"
         },
@@ -3577,7 +3611,8 @@ test("marzban getUser ignores raw config links when resolving subscriptionUrl", 
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 321,
-        subscriptionUrl: null
+        subscriptionId: "alice",
+        subscriptionUrl: "https://marzban.example.com/sub/alice"
       });
     }
   );
@@ -3618,7 +3653,49 @@ test("marzban getUser resolves a relative subscription path against the panel ba
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 321,
+        subscriptionId: "alice",
         subscriptionUrl: "https://marzban.example.com/sub/alice"
+      });
+    }
+  );
+});
+
+test("marzban getUser builds subscriptionUrl from subscriptionId and panel path", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ used_traffic: 321 })
+      }
+    ],
+    [],
+    async () => {
+      const result = await marzbanAdapter.getUser(
+        {
+          url: "https://marzban.example.com/",
+          subscriptionUrl: "https://marzban.example.com/",
+          subscriptionPath: "subscription",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          subscriptionId: "ticket-123",
+          usedBytes: 10
+        }
+      );
+
+      assert.deepEqual(result, {
+        username: "alice",
+        usedBytes: 321,
+        subscriptionId: "ticket-123",
+        subscriptionUrl: "https://marzban.example.com/subscription/ticket-123"
       });
     }
   );
@@ -3655,6 +3732,7 @@ test("marzban getUser falls back to local usedBytes when remote traffic is missi
       assert.deepEqual(result, {
         username: "alice",
         usedBytes: 77,
+        subscriptionId: "alice",
         subscriptionUrl: null
       });
     }
@@ -3774,6 +3852,7 @@ test("marzban-backed create backfills subscriptionUrl from remote lookup when th
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -3799,12 +3878,7 @@ test("marzban-backed create backfills subscriptionUrl from remote lookup when th
           {
             ok: true,
             status: 200,
-            json: async () => ({
-              username: "create-link-user",
-              data: {
-                links: { sub_url: "/sub/create-link-user" }
-              }
-            })
+            json: async () => ({ username: "create-link-user" })
           }
         ],
         calls,
@@ -3826,9 +3900,9 @@ test("marzban-backed create backfills subscriptionUrl from remote lookup when th
           });
 
           assert.equal(created.subscriptionUrl, "https://marzban.example.com/sub/create-link-user");
-          assert.equal(calls.length, 4);
-          assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
-          assert.equal(calls[3].url, "https://marzban.example.com/api/user/create-link-user");
+          assert.equal(calls.length, 2);
+          assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+          assert.equal(calls[1].url, "https://marzban.example.com/api/user");
         }
       );
     }
@@ -3869,6 +3943,7 @@ test("marzban-backed create does not store raw config links as subscriptionUrl",
           name: "Marzban Panel",
           type: "marzban",
           url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
           username: "panel-admin",
           secret: "panel-secret"
         }
@@ -3918,8 +3993,8 @@ test("marzban-backed create does not store raw config links as subscriptionUrl",
             }
           });
 
-          assert.equal(created.subscriptionUrl ?? null, null);
-          assert.equal(calls.length, 4);
+          assert.equal(created.subscriptionUrl, "https://marzban.example.com/sub/raw-link-user");
+          assert.equal(calls.length, 2);
         }
       );
     }
@@ -4949,7 +5024,7 @@ test("reseller create vpn account flow works without inboundIds", async () => {
           assert.equal(created.username, "client-ok");
           assert.equal(created.inboundMode, "all");
           assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002"]);
-          assert.equal(created.subscriptionUrl ?? null, null);
+          assert.equal(created.subscriptionUrl, null);
         }
       );
       assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");

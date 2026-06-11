@@ -30,6 +30,18 @@ function normalizeInboundSearchText(value) {
   return (typeof normalized.normalize === "function" ? normalized.normalize("NFKC") : normalized).toLowerCase();
 }
 
+function isPublicSubscriptionUrl(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function publicUser(user) {
   const safe = { ...user };
   safe.inboundMode = normalizeInboundMode(safe.inboundMode);
@@ -37,6 +49,9 @@ function publicUser(user) {
     safe.inboundId = preferredInboundId(safe.inboundIds, safe.inboundId);
   } else if (safe.inboundId) {
     safe.inboundId = preferredInboundId([safe.inboundId], safe.inboundId);
+  }
+  if (!isPublicSubscriptionUrl(safe.subscriptionUrl)) {
+    safe.subscriptionUrl = null;
   }
   return safe;
 }
@@ -57,7 +72,10 @@ async function hydrateSubscriptionUrlForUser(actor, user) {
     const remoteUser = await adapter.getUser(panel, user);
     const subscriptionUrl = typeof remoteUser?.subscriptionUrl === "string" ? remoteUser.subscriptionUrl.trim() : "";
     if (!subscriptionUrl) return user;
-    return store.update("users", user.id, { subscriptionUrl }) || { ...user, subscriptionUrl };
+    const patch = { subscriptionUrl };
+    const subscriptionId = typeof remoteUser?.subscriptionId === "string" ? remoteUser.subscriptionId.trim() : "";
+    if (subscriptionId && !user.subscriptionId) patch.subscriptionId = subscriptionId;
+    return store.update("users", user.id, patch) || { ...user, ...patch };
   } catch {
     return user;
   }
@@ -391,6 +409,7 @@ export async function handleApi(req, res, route) {
       type,
       url,
       subscriptionUrl: body.subscriptionUrl || "",
+      subscriptionPath: body.subscriptionPath || "sub",
       username: body.username || "",
       secret: body.secret || "",
       apiKey: body.apiKey || "",
@@ -559,15 +578,22 @@ export async function handleApi(req, res, route) {
           try {
             const refreshedUser = await adapter.getUser(panel, {
               username: remoteUser?.username ?? user.username,
-              usedBytes: user.usedBytes
+              usedBytes: user.usedBytes,
+              subscriptionId: remoteUser?.subscriptionId ?? user.subscriptionId
             });
             subscriptionUrl = typeof refreshedUser?.subscriptionUrl === "string" ? refreshedUser.subscriptionUrl.trim() : "";
           } catch {
             subscriptionUrl = "";
           }
         }
+        const patch = {};
+        const remoteSubscriptionId = typeof remoteUser?.subscriptionId === "string" ? remoteUser.subscriptionId.trim() : "";
+        if (remoteSubscriptionId && !user.subscriptionId) patch.subscriptionId = remoteSubscriptionId;
         if (subscriptionUrl) {
-          createdUser = store.update("users", user.id, { subscriptionUrl }) || user;
+          patch.subscriptionUrl = subscriptionUrl;
+        }
+        if (Object.keys(patch).length) {
+          createdUser = store.update("users", user.id, patch) || { ...user, ...patch };
         }
       } catch (error) {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
@@ -689,6 +715,10 @@ export async function handleApi(req, res, route) {
       const subscriptionUrl = typeof result?.subscriptionUrl === "string" ? result.subscriptionUrl.trim() : "";
       if (subscriptionUrl) {
         patch.subscriptionUrl = subscriptionUrl;
+      }
+      const subscriptionId = typeof result?.subscriptionId === "string" ? result.subscriptionId.trim() : "";
+      if (subscriptionId && !user.subscriptionId) {
+        patch.subscriptionId = subscriptionId;
       }
       const updated = Object.keys(patch).length ? store.update("users", user.id, patch) : user;
       store.audit(actor, "user.syncTraffic", user.id, { username: user.username, usedBytes: updated.usedBytes });
