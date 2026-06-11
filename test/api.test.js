@@ -6569,6 +6569,70 @@ test("superadmin users api exposes owner usernames and orphaned users are marked
   );
 });
 
+test("dashboard totals count reseller accounts only", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const before = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/dashboard",
+        session: login.session
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-count-a",
+          password: "reseller-pass-a",
+          role: "admin",
+          trafficLimitBytes: 1000
+        }
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "superadmin-count",
+          password: "super-pass",
+          role: "superadmin"
+        }
+      });
+
+      const dashboard = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/dashboard",
+        session: login.session
+      });
+      assert.equal(dashboard.totals.resellers, before.totals.resellers + 1);
+      assert.ok(dashboard.totals.admins >= before.totals.admins + 2);
+    }
+  );
+});
+
+test("superadmin sidebar and users copy use customer-user wording", async () => {
+  const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  const navSource = source.slice(source.indexOf("function nav()"), source.indexOf("function shell("));
+  const usersSource = source.slice(source.indexOf("function users()"), source.indexOf("function operations()"));
+  assert.match(navSource, /\["users", "Customer Users", "Customers and traffic"\]/);
+  assert.doesNotMatch(navSource, /\["users", "VPN Accounts", "Customers and traffic"\]/);
+  assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);
+  assert.match(usersSource, /<th>User<\/th>/);
+  assert.match(usersSource, /No users yet\./);
+});
+
 test("a superadmin cannot delete itself", async () => {
   const { canDeleteAdmin } = await importFresh("../src/routes/api.js");
   const actor = { id: "adm_1", role: "superadmin" };

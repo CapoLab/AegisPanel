@@ -396,12 +396,14 @@ function dashboard(actor) {
   const panels = scopedPanels(actor);
   const users = scopedUsers(actor);
   const admins = actor.role === "superadmin" ? store.list("admins") : [actor];
+  const resellers = admins.filter((admin) => admin.role === "admin");
   const usedBytes = users.reduce((sum, user) => sum + Number(user.usedBytes || 0), 0);
   const limitBytes = users.reduce((sum, user) => sum + Number(user.limitBytes || 0), 0);
   return {
     actor: publicAdmin(actor),
     totals: {
       admins: admins.length,
+      resellers: resellers.length,
       panels: panels.length,
       users: users.length,
       activeUsers: users.filter((user) => user.active).length,

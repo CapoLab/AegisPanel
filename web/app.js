@@ -328,7 +328,7 @@ function nav() {
         ["dashboard", "Dashboard", "Overview and live totals"],
         ["panels", "Panels", "Panel registry and sync"],
         ["admins", "Resellers", "SuperAdmin and reseller accounts"],
-        ["users", "VPN Accounts", "Customers and traffic"],
+        ["users", "Customer Users", "Customers and traffic"],
         ["operations", "Operations", "Backup, logs, system"]
       ];
   return items.map(([key, label, hint]) => `
@@ -519,12 +519,12 @@ function dashboard() {
     `;
   }
   return `
-    ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, VPN accounts, traffic, and operations.")}
+    ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, customer users, traffic, and operations.")}
     <section class="metrics">
-      ${metric("Resellers", totals.admins, "superadmin + resellers")}
+      ${metric("Resellers", totals.resellers, "reseller accounts")}
       ${metric("Panels", totals.panels, "registered upstreams")}
-      ${metric("VPN Accounts", totals.users, `${totals.activeUsers || 0} active`)}
-      ${metric("Traffic Used", bytes(totals.usedBytes), `${bytes(totals.limitBytes)} allocated`)}
+      ${metric("Users", totals.users, `${totals.activeUsers || 0} active users`)}
+      ${metric("Traffic Used", bytes(totals.usedBytes), `${bytes(totals.limitBytes)} allocated to users`)}
     </section>
     <section class="split">
       <article class="card">
@@ -655,7 +655,7 @@ function users() {
       <p class="muted section-note">Customer users are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>VPN Account</th><th>Owner / Reseller</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Owner / Reseller</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 ${state.users.map((u) => `
                   <tr>
@@ -669,7 +669,7 @@ function users() {
                     <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                     <td class="row-actions icon-actions">${renderUserRowActions(u)}</td>
                   </tr>
-                `).join("") || emptyRow(9, "No VPN accounts yet.")}
+                `).join("") || emptyRow(9, "No users yet.")}
               </tbody>
             </table>
       </div>
