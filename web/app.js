@@ -660,32 +660,33 @@ function operations() {
       ${metric("App Uptime", `${Math.floor((state.system?.appUptimeSeconds || 0) / 60)}m`, "runtime")}
       ${metric("Logs", state.logs.length, "audit records")}
     </section>
-    <section class="split">
-      <article class="card">
-        <div class="card-head"><h3>Backup JSON</h3><span class="muted">Download a local AegisPanel snapshot.</span></div>
-        <p class="muted">Includes panels, resellers, users, traffic, audit logs, news, and system metadata.</p>
-        <p class="muted">Backup may include stored panel credentials. Keep this file private.</p>
+    <section class="ops-grid">
+      <article class="card ops-card">
+        <div class="card-head"><h3>Backup JSON</h3><span class="muted">Download a local snapshot.</span></div>
+        <p class="muted ops-copy">Backup may include stored panel credentials. Keep this file private.</p>
         <button class="primary" onclick="window.Aegis.downloadBackup()">Backup JSON</button>
       </article>
-      <article class="card">
-        <div class="card-head"><h3>Restore JSON</h3><span class="muted">Upload JSON and type RESTORE to apply it.</span></div>
-        <form class="form" onsubmit="window.Aegis.restoreBackup(event)">
-          <label>Backup file<input name="backupFile" type="file" accept=".json,application/json" required onchange="window.Aegis.clearRestoreBackupError()" /></label>
-          <label>Confirmation<input name="confirmation" autocomplete="off" placeholder="RESTORE" required oninput="window.Aegis.clearRestoreBackupError()" /></label>
-          <p class="muted">Type RESTORE before restoring the local store.</p>
-          <div id="restore-backup-error">${state.restoreBackupError ? `<p class="alert danger">${esc(state.restoreBackupError)}</p>` : ""}</div>
-          <button class="primary" type="submit">Restore JSON</button>
-        </form>
+      <article class="card ops-card">
+        <div class="card-head"><h3>Restore JSON</h3><span class="muted">Upload a backup and confirm.</span></div>
+        <p class="muted ops-copy">Restore replaces the local store after RESTORE confirmation.</p>
+        <button class="ghost" onclick="window.Aegis.showRestoreBackupForm()">Restore JSON</button>
       </article>
-    </section>
-    <section class="split">
-      <article class="card">
-        <div class="card-head"><h3>News</h3><button class="ghost" onclick="window.Aegis.showNewsForm()">Add news</button></div>
-        ${state.news.map((n) => `<div class="notice-item"><strong>${esc(n.title || "Update")}</strong><p>${esc(n.message || "")}</p></div>`).join("") || `<p class="muted">No news yet.</p>`}
+      <article class="card ops-card">
+        <div class="card-head"><h3>Audit Logs</h3><span class="muted">Latest system and admin events.</span></div>
+        <p class="muted ops-copy">View the newest audit entries in a compact modal.</p>
+        <button class="ghost" onclick="window.Aegis.showAuditLogs()">Show Logs</button>
       </article>
-      <article class="card">
+      <article class="card ops-card">
+        <div class="card-head"><h3>News</h3><span class="muted">Operator announcements and notices.</span></div>
+        <p class="muted ops-copy">View recent news or create a new notice.</p>
+        <div class="actions">
+          <button class="ghost" onclick="window.Aegis.showNewsList()">Show News</button>
+          <button class="ghost" onclick="window.Aegis.showNewsForm()">Create News</button>
+        </div>
+      </article>
+      <article class="card ops-card ops-span-2">
         <div class="card-head"><h3>System</h3><span class="pill">local node</span></div>
-        <table class="table compact-table">
+        <table class="table compact-table ops-system-table">
           <tbody>
             <tr><td>Host uptime</td><td>${Math.floor((state.system?.uptimeSeconds || 0) / 3600)}h</td></tr>
             <tr><td>Load average</td><td>${(state.system?.loadAverage || []).map((n) => Number(n).toFixed(2)).join(" / ")}</td></tr>
@@ -693,10 +694,6 @@ function operations() {
           </tbody>
         </table>
       </article>
-    </section>
-    <section class="card section">
-      <div class="card-head"><h3>Audit logs</h3><span class="muted">latest system and admin events</span></div>
-      ${logsTable(state.logs)}
     </section>
   `;
 }
@@ -712,6 +709,40 @@ function logsTable(rows) {
       </table>
     </div>
   `;
+}
+
+function restoreBackupModalBody() {
+  return `
+    <form class="form" onsubmit="window.Aegis.restoreBackup(event)">
+      <label>Backup file<input name="backupFile" type="file" accept=".json,application/json" required onchange="window.Aegis.clearRestoreBackupError()" /></label>
+      <label>Confirmation<input name="confirmation" autocomplete="off" placeholder="RESTORE" required oninput="window.Aegis.clearRestoreBackupError()" /></label>
+      <p class="muted">Type RESTORE before restoring the local store.</p>
+      <div id="restore-backup-error">${state.restoreBackupError ? `<p class="alert danger">${esc(state.restoreBackupError)}</p>` : ""}</div>
+      <button class="primary" type="submit">Restore JSON</button>
+    </form>
+  `;
+}
+
+function showRestoreBackupForm() {
+  if (!requireSuperadminUi()) return;
+  modal("Restore JSON", restoreBackupModalBody());
+}
+
+function showAuditLogs() {
+  if (!requireSuperadminUi()) return;
+  modal("Audit Logs", `
+    <p class="muted">Latest system and admin events.</p>
+    ${logsTable(state.logs.slice(0, 10))}
+  `);
+}
+
+function showNewsList() {
+  if (!requireSuperadminUi()) return;
+  modal("News", `
+    <div class="notice-list">
+      ${state.news.map((n) => `<div class="notice-item"><strong>${esc(n.title || "Update")}</strong><p>${esc(n.message || "")}</p></div>`).join("") || `<p class="muted">No news yet.</p>`}
+    </div>
+  `);
 }
 
 function emptyRow(cols, text) {
@@ -742,8 +773,8 @@ function modal(title, body) {
 }
 
 function modalPanel(title, body) {
-  const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
   const titleLower = String(title).toLowerCase();
+  const wide = titleLower.includes("inbounds") || titleLower.includes("audit logs") ? " wide-modal" : "";
   const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") || titleLower.includes("edit reseller") ? " edit-modal" : "";
   return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
@@ -2262,6 +2293,9 @@ window.Aegis = {
   clearEditUserExpiry,
   openEditUserExpiryPicker,
   createNews,
+  showRestoreBackupForm,
+  showAuditLogs,
+  showNewsList,
   syncPanel,
   syncUserTraffic,
   copySubscriptionLink,

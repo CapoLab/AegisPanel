@@ -281,6 +281,33 @@ small {
   margin-top: 16px;
 }
 
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.ops-card {
+  padding: 16px;
+}
+
+.ops-card .card-head {
+  margin-bottom: 10px;
+}
+
+.ops-copy {
+  margin: 0 0 12px;
+}
+
+.ops-span-2 {
+  grid-column: span 2;
+}
+
+.ops-system-table {
+  margin-top: 0;
+}
+
 .card-head {
   display: flex;
   align-items: center;
@@ -1371,8 +1398,13 @@ small {
   }
 
   .metrics,
-  .split {
+  .split,
+  .ops-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .ops-span-2 {
+    grid-column: span 2;
   }
 }
 
@@ -1388,8 +1420,13 @@ small {
   }
 
   .metrics,
-  .split {
+  .split,
+  .ops-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ops-span-2 {
+    grid-column: span 1;
   }
 
   .modal.wide-modal {

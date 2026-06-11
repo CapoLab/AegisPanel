@@ -7029,8 +7029,14 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.match(operationsSource, /Backup may include stored panel credentials\. Keep this file private\./);
   assert.match(operationsSource, /<h3>Restore JSON<\/h3>/);
   assert.match(operationsSource, /Type RESTORE before restoring the local store\./);
-  assert.match(operationsSource, /<h3>Audit logs<\/h3><span class="muted">latest system and admin events<\/span>/);
-  assert.match(operationsSource, /logsTable\(state\.logs\)/);
+  assert.match(operationsSource, /<h3>Audit Logs<\/h3><span class="muted">Latest system and admin events\.<\/span>/);
+  assert.match(operationsSource, /Show Logs/);
+  assert.match(operationsSource, /showAuditLogs\(\)/);
+  assert.match(operationsSource, /showRestoreBackupForm\(\)/);
+  assert.match(operationsSource, /Show News/);
+  assert.match(operationsSource, /Create News/);
+  assert.match(operationsSource, /logsTable\(state\.logs\.slice\(0, 10\)\)/);
+  assert.doesNotMatch(operationsSource, /logsTable\(state\.logs(?!\.slice)\)/);
   assert.match(source, /return `aegispanel-backup-\$\{year\}-\$\{month\}-\$\{day\}-\$\{hour\}-\$\{minute\}\.json`;/);
   assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
