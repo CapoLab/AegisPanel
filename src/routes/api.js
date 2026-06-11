@@ -741,6 +741,49 @@ export async function handleApi(req, res, route) {
     return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
   }
 
+  const testConnection = match(pathname, "/api/superadmin/panels/:id/test-connection");
+  if (testConnection && method === "POST") {
+    const superadmin = requireAuth(req, "superadmin");
+    const panel = store.find("panels", testConnection.id);
+    if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    if (panel.type !== "marzban") {
+      return sendJson(res, 501, { ok: false, error: "Connection testing is not available for this panel type yet" });
+    }
+    const adapter = adapterFor(panel.type);
+    if (!adapter || typeof adapter.listInbounds !== "function") {
+      return sendJson(res, 501, { ok: false, error: "Connection testing is not available for this panel type yet" });
+    }
+    try {
+      const inbounds = await adapter.listInbounds(panel);
+      const checkedAt = new Date().toISOString();
+      const data = {
+        ok: true,
+        panelId: panel.id,
+        type: panel.type,
+        message: `Connection OK: ${inbounds.length} inbounds`,
+        inboundCount: inbounds.length,
+        checkedAt
+      };
+      store.audit(superadmin, "panel.testConnection", panel.id, {
+        inboundCount: inbounds.length,
+        checkedAt
+      });
+      return sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      try {
+        store.audit(superadmin, "panel.testConnection.failed", panel.id, {
+          error: error.message || "Panel connection test failed"
+        });
+      } catch {
+        // Ignore audit failures so the API can still return the original error.
+      }
+      return sendJson(res, error.status || 502, {
+        ok: false,
+        error: error.message || "Panel connection test failed"
+      });
+    }
+  }
+
   const scopedInbounds = match(pathname, "/api/admin/panels/:id/inbounds");
   if (scopedInbounds && method === "GET") {
     requireAuth(req, "superadmin");

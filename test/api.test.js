@@ -5553,6 +5553,263 @@ test("superadmin can load inbounds through the admin-scoped endpoint", async () 
   );
 });
 
+test("superadmin can test marzban panel connection successfully", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ([
+              { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 },
+              { tag: "VMess WS TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
+            ])
+          }
+        ],
+        calls,
+        async () => {
+          const res = await callApi(handleApi, {
+            method: "POST",
+            pathname: `/api/superadmin/panels/${panel.id}/test-connection`,
+            session: login.session
+          });
+          assert.equal(res.ok, true);
+          assert.equal(res.panelId, panel.id);
+          assert.equal(res.type, "marzban");
+          assert.equal(res.inboundCount, 2);
+          assert.match(res.message, /Connection OK: 2 inbounds/);
+          assert.match(res.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+          assert.equal("secret" in res, false);
+          assert.equal("apiKey" in res, false);
+          assert.equal("token" in res, false);
+          assert.equal("password" in res, false);
+        }
+      );
+      assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+      assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+    }
+  );
+});
+
+test("reseller cannot test panel connection", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-connection-test",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "admin-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: `/api/superadmin/panels/${panel.id}/test-connection`,
+        session: resellerLogin.session
+      });
+      assert.equal(res.statusCode, 403);
+      assert.match(res.json.error, /Insufficient permissions/);
+    }
+  );
+});
+
+test("missing panel returns 404 from test connection", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels/pan_missing/test-connection",
+        session: login.session
+      });
+      assert.equal(res.statusCode, 404);
+      assert.match(res.json.error, /Panel not found/);
+    }
+  );
+});
+
+test("marzban auth failure returns a clear connection test error", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      await withMockFetch(
+        [
+          {
+            ok: false,
+            status: 401,
+            json: async () => ({ detail: "Unauthorized" })
+          }
+        ],
+        calls,
+        async () => {
+          const res = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: `/api/superadmin/panels/${panel.id}/test-connection`,
+            session: login.session
+          });
+          assert.equal(res.statusCode, 401);
+          assert.match(res.json.error, /Marzban token request failed with HTTP 401/);
+        }
+      );
+    }
+  );
+});
+
+test("marzban inbounds failure returns a clear connection test error", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 502,
+            json: async () => ({ detail: "Bad Gateway" })
+          }
+        ],
+        calls,
+        async () => {
+          const res = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: `/api/superadmin/panels/${panel.id}/test-connection`,
+            session: login.session
+          });
+          assert.equal(res.statusCode, 502);
+          assert.match(res.json.error, /Marzban inbounds request failed with HTTP 502/);
+        }
+      );
+    }
+  );
+});
+
 test("reseller create vpn account flow works without inboundIds", async () => {
   const calls = [];
   await withTempEnv(
@@ -7042,6 +7299,7 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
   assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);
   assert.match(panelsSource, /iconActionButton\("≡", "View inbounds"/);
+  assert.match(panelsSource, /iconActionButton\("✓", "Test connection"/);
   assert.match(panelsSource, /iconActionButton\("↻", "Sync not ready"|iconActionButton\("↻", "Sync panel"/);
   assert.match(panelsSource, /iconActionButton\("🗑", "Delete panel"/);
   assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);

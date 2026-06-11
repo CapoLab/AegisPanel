@@ -11,6 +11,7 @@ const state = {
   news: [],
   system: null,
   syncingUserId: null,
+  testingPanelId: null,
   restoreBackupError: "",
   editPanelId: "",
   editPanel: null,
@@ -551,6 +552,9 @@ function panels() {
                 <td class="row-actions icon-actions">
                   ${iconActionButton("✎", "Edit panel", `window.Aegis.showEditPanelForm('${esc(p.id)}')`, { className: "edit-action" })}
                   ${iconActionButton("≡", "View inbounds", `window.Aegis.loadPanelInbounds('${esc(p.id)}')`, { className: "inbounds-action" })}
+                  ${state.testingPanelId === p.id
+                    ? iconActionButton("✓", "Testing connection", "", { disabled: true, className: "test-action" })
+                    : iconActionButton("✓", "Test connection", `window.Aegis.testPanelConnection('${esc(p.id)}')`, { className: "test-action" })}
                   ${p.type === "marzban"
                     ? iconActionButton("↻", "Sync not ready", "", { disabled: true, className: "sync-action" })
                     : iconActionButton("↻", "Sync panel", `window.Aegis.syncPanel('${esc(p.id)}')`, { className: "sync-action" })}
@@ -2082,6 +2086,24 @@ async function syncPanel(id) {
   }, state.notice || "Panel synced");
 }
 
+async function testPanelConnection(id) {
+  if (!requireSuperadminUi()) return;
+  state.testingPanelId = id;
+  state.error = "";
+  state.notice = "";
+  renderApp();
+  try {
+    const result = await api(`/api/superadmin/panels/${id}/test-connection`, { method: "POST" });
+    state.notice = result.message || `Connection OK: ${result.inboundCount} inbounds`;
+    state.error = "";
+  } catch (error) {
+    state.error = error.message || "Panel connection test failed";
+  } finally {
+    state.testingPanelId = null;
+    renderApp();
+  }
+}
+
 async function loadPanelInbounds(id) {
   if (!requireSuperadminUi()) return;
   modal("Panel inbounds", `<p class="muted">Loading inbounds...</p>`);
@@ -2297,6 +2319,7 @@ window.Aegis = {
   showAuditLogs,
   showNewsList,
   syncPanel,
+  testPanelConnection,
   syncUserTraffic,
   copySubscriptionLink,
   loadPanelInbounds,
