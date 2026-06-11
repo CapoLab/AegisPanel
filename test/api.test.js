@@ -3444,9 +3444,294 @@ test("panel credentials are stripped from api responses", async () => {
         pathname: "/api/superadmin/backup",
         session
       });
-      assert.equal(backup.panels[0].username, undefined);
-      assert.equal(backup.panels[0].secret, undefined);
-      assert.equal(backup.panels[0].apiKey, undefined);
+      assert.equal(backup.app, "AegisPanel");
+      assert.equal(backup.version, "0.1.0");
+      assert.equal(backup.schemaVersion, 1);
+      assert.equal(typeof backup.createdAt, "string");
+      assert.equal(backup.data.panels[0].username, "panel-admin");
+      assert.equal(backup.data.panels[0].secret, "panel-secret");
+      assert.equal(backup.data.panels[0].apiKey, "");
+      assert.equal(backup.data.sessionSecret, undefined);
+    }
+  );
+});
+
+test("superadmin restore backup validates metadata and confirmation", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+
+      const invalidJson = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        rawBody: `{"confirmation":"RESTORE","backup":`
+      });
+      assert.equal(invalidJson.statusCode, 400);
+      assert.match(invalidJson.json.error, /Invalid JSON body/);
+
+      const missingMetadata = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "RESTORE",
+          backup: {
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(missingMetadata.statusCode, 400);
+      assert.match(missingMetadata.json.error, /Invalid backup metadata/);
+
+      const noAdmins = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "RESTORE",
+          backup: {
+            app: "AegisPanel",
+            version: "0.1.0",
+            schemaVersion: 1,
+            createdAt: "2026-06-10T00:00:00.000Z",
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(noAdmins.statusCode, 400);
+      assert.match(noAdmins.json.error, /Backup must contain at least one active SuperAdmin\./);
+
+      const noSuperadmin = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "RESTORE",
+          backup: {
+            app: "AegisPanel",
+            version: "0.1.0",
+            schemaVersion: 1,
+            createdAt: "2026-06-10T00:00:00.000Z",
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [
+                { id: "adm_1", username: "inactive-admin", role: "admin", active: true }
+              ],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(noSuperadmin.statusCode, 400);
+      assert.match(noSuperadmin.json.error, /Backup must contain at least one active SuperAdmin\./);
+
+      const inactiveSuperadmin = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "RESTORE",
+          backup: {
+            app: "AegisPanel",
+            version: "0.1.0",
+            schemaVersion: 1,
+            createdAt: "2026-06-10T00:00:00.000Z",
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [
+                { id: "adm_1", username: "disabled-superadmin", role: "superadmin", active: false }
+              ],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(inactiveSuperadmin.statusCode, 400);
+      assert.match(inactiveSuperadmin.json.error, /Backup must contain at least one active SuperAdmin\./);
+
+      const confirmationRequired = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "NOPE",
+          backup: {
+            app: "AegisPanel",
+            version: "0.1.0",
+            schemaVersion: 1,
+            createdAt: "2026-06-10T00:00:00.000Z",
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(confirmationRequired.statusCode, 400);
+      assert.match(confirmationRequired.json.error, /Type RESTORE to confirm restore/);
+    }
+  );
+});
+
+test("superadmin restore backup updates local store data safely", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const backup = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/backup",
+        session: login.session
+      });
+      backup.data.panels.push({
+        id: "pan_restore",
+        name: "Restored panel",
+        type: "marzban",
+        url: "https://restore.example.com",
+        subscriptionUrl: "https://restore.example.com",
+        subscriptionPath: "sub",
+        username: "restore-user",
+        secret: "restore-secret",
+        active: true
+      });
+      backup.data.meta = { ...backup.data.meta, createdAt: "2026-06-10T00:00:00.000Z" };
+      backup.createdAt = "2026-06-10T00:00:00.000Z";
+      const restore = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: login.session,
+        body: {
+          confirmation: "RESTORE",
+          backup
+        }
+      });
+      assert.equal(restore.snapshot.includes("aegispanel-restore-snapshot-"), true);
+      assert.equal(store.list("panels").some((panel) => panel.id === "pan_restore"), true);
+      assert.equal(store.list("panels").find((panel) => panel.id === "pan_restore").secret, "restore-secret");
+      const logs = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/logs",
+        session: login.session
+      });
+      assert.equal(logs[0].action, "backup.restore");
+    }
+  );
+});
+
+test("non-superadmin cannot restore a backup", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const admin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "restore-admin",
+          password: "admin-pass",
+          role: "admin",
+          trafficLimitBytes: 100
+        }
+      });
+      const adminLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: admin.username, password: "admin-pass" }
+      });
+      const restore = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/restore",
+        session: adminLogin.session,
+        body: {
+          confirmation: "RESTORE",
+          backup: {
+            app: "AegisPanel",
+            version: "0.1.0",
+            schemaVersion: 1,
+            createdAt: "2026-06-10T00:00:00.000Z",
+            data: {
+              meta: { version: 1, product: "AegisPanel", createdAt: "2026-06-10T00:00:00.000Z" },
+              admins: [],
+              panels: [],
+              users: [],
+              trafficEvents: [],
+              news: [],
+              auditLogs: [],
+              distribution: { edition: "community", status: "free", monetization: "disabled", seats: 3, expiresAt: null, updatedAt: "2026-06-10T00:00:00.000Z" }
+            }
+          }
+        }
+      });
+      assert.equal(restore.statusCode, 403);
+      assert.match(restore.json.error, /Insufficient permissions/);
     }
   );
 });
@@ -6739,9 +7024,14 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.doesNotMatch(dashboardSource, /latest audit events/);
   assert.doesNotMatch(dashboardSource, /logsTable\(state\.logs\.slice\(/);
   const operationsSource = source.slice(source.indexOf("function operations()"), source.indexOf("window.Aegis ="));
-  assert.match(operationsSource, /pageTitle\("Operations", "Audit logs, backups, and system maintenance\./);
+  assert.match(operationsSource, /pageTitle\("Operations", "Backup and restore JSON, audit logs, news, and system maintenance\."/);
+  assert.match(operationsSource, /<h3>Backup JSON<\/h3>/);
+  assert.match(operationsSource, /Backup may include stored panel credentials\. Keep this file private\./);
+  assert.match(operationsSource, /<h3>Restore JSON<\/h3>/);
+  assert.match(operationsSource, /Type RESTORE before restoring the local store\./);
   assert.match(operationsSource, /<h3>Audit logs<\/h3><span class="muted">latest system and admin events<\/span>/);
   assert.match(operationsSource, /logsTable\(state\.logs\)/);
+  assert.match(source, /return `aegispanel-backup-\$\{year\}-\$\{month\}-\$\{day\}-\$\{hour\}-\$\{minute\}\.json`;/);
   assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
   assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);

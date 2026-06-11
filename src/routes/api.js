@@ -1,5 +1,5 @@
 import { cpus, freemem, loadavg, totalmem, uptime } from "node:os";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
 import { store } from "../storage/store.js";
@@ -45,6 +45,62 @@ function adminWithMetrics(admin) {
 function publicPanel(panel) {
   const { username, secret, apiKey, token, credentials, password, ...safe } = panel;
   return safe;
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function readPackageJson() {
+  return JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+}
+
+function formatBackupTimestamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}-${hour}-${minute}`;
+}
+
+function createBackupEnvelope(state = store.state) {
+  const pkg = readPackageJson();
+  return {
+    app: "AegisPanel",
+    version: pkg.version,
+    schemaVersion: state?.meta?.version ?? 1,
+    createdAt: new Date().toISOString(),
+    data: cloneJson(state)
+  };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateBackupEnvelope(backup) {
+  if (!isPlainObject(backup)) return "Invalid backup metadata";
+  if (backup.app !== "AegisPanel") return "Invalid backup metadata";
+  if (!Number.isInteger(backup.schemaVersion) || backup.schemaVersion < 1) return "Invalid backup metadata";
+  if (typeof backup.createdAt !== "string" || !backup.createdAt.trim()) return "Invalid backup metadata";
+  if (!isPlainObject(backup.data)) return "Invalid backup data";
+  if (!isPlainObject(backup.data.meta) || backup.data.meta.product !== "AegisPanel") return "Invalid backup data";
+  const requiredArrays = ["panels", "users", "trafficEvents", "news", "auditLogs"];
+  for (const key of requiredArrays) {
+    if (!Array.isArray(backup.data[key])) return "Invalid backup data";
+  }
+  if (!Array.isArray(backup.data.admins)) return "Invalid backup data";
+  if (!isPlainObject(backup.data.distribution)) return "Invalid backup data";
+  return "";
+}
+
+function validateRestoreAdmins(admins) {
+  const list = Array.isArray(admins) ? admins : null;
+  if (!list) return "Invalid backup data";
+  const activeSuperadmins = list.filter((admin) => admin && admin.role === "superadmin" && admin.active !== false);
+  if (!activeSuperadmins.length) return "Backup must contain at least one active SuperAdmin.";
+  return "";
 }
 
 function editablePanel(panel) {
@@ -1018,13 +1074,59 @@ export async function handleApi(req, res, route) {
 
   if (method === "GET" && pathname === "/api/superadmin/backup") {
     requireAuth(req, "superadmin");
-    return sendJson(res, 200, {
-      ok: true,
-      data: {
-        ...store.state,
-        panels: store.list("panels").map(publicPanel)
+    return sendJson(res, 200, { ok: true, data: createBackupEnvelope() });
+  }
+
+  if (method === "POST" && pathname === "/api/superadmin/restore") {
+    const superadmin = requireAuth(req, "superadmin");
+    try {
+      const body = await readJson(req, { limitBytes: 10 * 1024 * 1024 });
+      const backup = isPlainObject(body.backup) ? body.backup : body;
+      const confirmation = String(body.confirmation ?? backup.confirmation ?? "").trim();
+      if (confirmation !== "RESTORE") {
+        const error = new Error("Type RESTORE to confirm restore.");
+        error.status = 400;
+        throw error;
       }
-    });
+      const metadataError = validateBackupEnvelope(backup);
+      if (metadataError) {
+        const error = new Error(metadataError);
+        error.status = 400;
+        throw error;
+      }
+      const adminSafetyError = validateRestoreAdmins(backup.data.admins);
+      if (adminSafetyError) {
+        const error = new Error(adminSafetyError);
+        error.status = 400;
+        throw error;
+      }
+      const snapshotPath = join(config.dataDir, `aegispanel-restore-snapshot-${formatBackupTimestamp()}.json`);
+      writeFileSync(snapshotPath, JSON.stringify(createBackupEnvelope(store.state), null, 2));
+      store.state = cloneJson(backup.data);
+      store.save();
+      store.audit(superadmin, "backup.restore", "all", {
+        snapshot: snapshotPath,
+        schemaVersion: backup.schemaVersion,
+        createdAt: backup.createdAt
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        data: {
+          restoredAt: new Date().toISOString(),
+          snapshot: snapshotPath
+        }
+      });
+    } catch (error) {
+      try {
+        store.audit(superadmin, "backup.restore.failed", "all", {
+          error: error.message,
+          status: error.status || 500
+        });
+      } catch {
+        // Ignore secondary audit failures so the API can still return the original error.
+      }
+      return sendJson(res, error.status || 500, { ok: false, error: error.message });
+    }
   }
 
   if (method === "GET" && pathname === "/api/superadmin/logs") {
@@ -1059,7 +1161,7 @@ export async function handleApi(req, res, route) {
   }
 
   if (method === "GET" && pathname === "/api/version") {
-    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    const pkg = readPackageJson();
     return sendJson(res, 200, { ok: true, data: { version: pkg.version, name: pkg.name } });
   }
 

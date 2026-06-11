@@ -11,6 +11,7 @@ const state = {
   news: [],
   system: null,
   syncingUserId: null,
+  restoreBackupError: "",
   editPanelId: "",
   editPanel: null,
   editPanelLoading: false,
@@ -652,12 +653,30 @@ function users() {
 
 function operations() {
   return `
-    ${pageTitle("Operations", "Audit logs, backups, and system maintenance.", `<button class="primary" onclick="window.Aegis.downloadBackup()">Backup JSON</button>`)}
+    ${pageTitle("Operations", "Backup and restore JSON, audit logs, news, and system maintenance.")}
     <section class="metrics">
       ${metric("CPU Cores", state.system?.cpuCount || "-", "host")}
       ${metric("Free Memory", bytes(state.system?.memory?.free), "available")}
       ${metric("App Uptime", `${Math.floor((state.system?.appUptimeSeconds || 0) / 60)}m`, "runtime")}
       ${metric("Logs", state.logs.length, "audit records")}
+    </section>
+    <section class="split">
+      <article class="card">
+        <div class="card-head"><h3>Backup JSON</h3><span class="muted">Download a local AegisPanel snapshot.</span></div>
+        <p class="muted">Includes panels, resellers, users, traffic, audit logs, news, and system metadata.</p>
+        <p class="muted">Backup may include stored panel credentials. Keep this file private.</p>
+        <button class="primary" onclick="window.Aegis.downloadBackup()">Backup JSON</button>
+      </article>
+      <article class="card">
+        <div class="card-head"><h3>Restore JSON</h3><span class="muted">Upload JSON and type RESTORE to apply it.</span></div>
+        <form class="form" onsubmit="window.Aegis.restoreBackup(event)">
+          <label>Backup file<input name="backupFile" type="file" accept=".json,application/json" required onchange="window.Aegis.clearRestoreBackupError()" /></label>
+          <label>Confirmation<input name="confirmation" autocomplete="off" placeholder="RESTORE" required oninput="window.Aegis.clearRestoreBackupError()" /></label>
+          <p class="muted">Type RESTORE before restoring the local store.</p>
+          <div id="restore-backup-error">${state.restoreBackupError ? `<p class="alert danger">${esc(state.restoreBackupError)}</p>` : ""}</div>
+          <button class="primary" type="submit">Restore JSON</button>
+        </form>
+      </article>
     </section>
     <section class="split">
       <article class="card">
@@ -2144,9 +2163,66 @@ async function downloadBackup() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `aegis-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = formatBackupFilename();
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function formatBackupFilename(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `aegispanel-backup-${year}-${month}-${day}-${hour}-${minute}.json`;
+}
+
+function refreshRestoreBackupError() {
+  const field = document.querySelector("#restore-backup-error");
+  if (!field) {
+    renderApp();
+    return;
+  }
+  field.innerHTML = state.restoreBackupError ? `<p class="alert danger">${esc(state.restoreBackupError)}</p>` : "";
+}
+
+function clearRestoreBackupError() {
+  state.restoreBackupError = "";
+  refreshRestoreBackupError();
+}
+
+async function restoreBackup(event) {
+  event.preventDefault();
+  if (!requireSuperadminUi()) return;
+  const form = new FormData(event.target);
+  const file = form.get("backupFile");
+  const confirmation = String(form.get("confirmation") || "").trim();
+  state.restoreBackupError = "";
+  refreshRestoreBackupError();
+  try {
+    if (!(file instanceof File) || file.size === 0) {
+      throw new Error("Select a backup file.");
+    }
+    if (confirmation !== "RESTORE") {
+      throw new Error("Type RESTORE to confirm restore.");
+    }
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch {
+      throw new Error("Invalid JSON backup file.");
+    }
+    await api("/api/superadmin/restore", {
+      method: "POST",
+      body: { confirmation, backup }
+    });
+    state.restoreBackupError = "";
+    state.notice = "Backup restored";
+    await load();
+  } catch (error) {
+    state.restoreBackupError = error.message || "Restore failed";
+    refreshRestoreBackupError();
+  }
 }
 
 window.Aegis = {
@@ -2194,6 +2270,8 @@ window.Aegis = {
   deleteAdmin,
   deleteUser,
   downloadBackup,
+  restoreBackup,
+  clearRestoreBackupError,
   toggleTheme() {
     state.theme = state.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = state.theme;
