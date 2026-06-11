@@ -6738,6 +6738,10 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.doesNotMatch(dashboardSource, /Recent activity/);
   assert.doesNotMatch(dashboardSource, /latest audit events/);
   assert.doesNotMatch(dashboardSource, /logsTable\(state\.logs\.slice\(/);
+  const operationsSource = source.slice(source.indexOf("function operations()"), source.indexOf("window.Aegis ="));
+  assert.match(operationsSource, /pageTitle\("Operations", "Audit logs, backups, and system maintenance\./);
+  assert.match(operationsSource, /<h3>Audit logs<\/h3><span class="muted">latest system and admin events<\/span>/);
+  assert.match(operationsSource, /logsTable\(state\.logs\)/);
   assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
   assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);

@@ -652,7 +652,7 @@ function users() {
 
 function operations() {
   return `
-    ${pageTitle("Operations", "Backups, audit trail, news, and local system telemetry.", `<button class="primary" onclick="window.Aegis.downloadBackup()">Backup JSON</button>`)}
+    ${pageTitle("Operations", "Audit logs, backups, and system maintenance.", `<button class="primary" onclick="window.Aegis.downloadBackup()">Backup JSON</button>`)}
     <section class="metrics">
       ${metric("CPU Cores", state.system?.cpuCount || "-", "host")}
       ${metric("Free Memory", bytes(state.system?.memory?.free), "available")}
@@ -676,7 +676,7 @@ function operations() {
       </article>
     </section>
     <section class="card section">
-      <div class="card-head"><h3>Audit logs</h3><span class="muted">security-sensitive actions</span></div>
+      <div class="card-head"><h3>Audit logs</h3><span class="muted">latest system and admin events</span></div>
       ${logsTable(state.logs)}
     </section>
   `;
