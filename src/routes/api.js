@@ -492,6 +492,7 @@ export async function handleApi(req, res, route) {
       username,
       uuid: body.uuid || null,
       subscriptionId: body.subscriptionId || null,
+      subscriptionUrl: null,
       inboundId: primaryInboundId,
       inboundMode: resellerMarzbanInbounds ? "all" : normalizeInboundMode(body.inboundMode),
       flow: actor.role === "superadmin" ? body.flow || "" : "",
@@ -510,6 +511,7 @@ export async function handleApi(req, res, route) {
     const user = store.insert("users", {
       ...userRecord
     });
+    let createdUser = user;
     if (panel.type === "marzban") {
       if (!adapter || typeof adapter.createUser !== "function") {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
@@ -521,11 +523,15 @@ export async function handleApi(req, res, route) {
         return sendJson(res, 501, { ok: false, error: "Real user creation is not available for this panel type yet" });
       }
       try {
-        await adapter.createUser(panel, {
+        const remoteUser = await adapter.createUser(panel, {
           ...user,
           inboundIds: userRecord.inboundIds || [],
           expiresAt
         });
+        if (Object.prototype.hasOwnProperty.call(remoteUser || {}, "subscriptionUrl")) {
+          const subscriptionUrl = remoteUser?.subscriptionUrl ?? null;
+          createdUser = store.update("users", user.id, { subscriptionUrl }) || user;
+        }
       } catch (error) {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
           store.update("admins", owner.id, {
@@ -540,7 +546,7 @@ export async function handleApi(req, res, route) {
       }
     }
     store.audit(actor, "user.create", user.id, { username: user.username });
-    return sendJson(res, 201, { ok: true, data: publicUser(user) });
+    return sendJson(res, 201, { ok: true, data: publicUser(createdUser) });
   }
 
   const userId = match(pathname, "/api/admin/users/:id");
@@ -641,7 +647,13 @@ export async function handleApi(req, res, route) {
     try {
       const result = await adapter.syncUserTraffic(panel, user);
       const usedBytes = finiteQuotaBytes(result?.usedBytes);
-      const updated = usedBytes !== null ? store.update("users", user.id, { usedBytes }) : user;
+      const patch = {};
+      if (usedBytes !== null) patch.usedBytes = usedBytes;
+      const subscriptionUrl = typeof result?.subscriptionUrl === "string" ? result.subscriptionUrl.trim() : "";
+      if (subscriptionUrl) {
+        patch.subscriptionUrl = subscriptionUrl;
+      }
+      const updated = Object.keys(patch).length ? store.update("users", user.id, patch) : user;
       store.audit(actor, "user.syncTraffic", user.id, { username: user.username, usedBytes: updated.usedBytes });
       return sendJson(res, 200, { ok: true, data: publicUser(updated) });
     } catch (error) {

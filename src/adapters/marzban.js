@@ -57,6 +57,21 @@ function extractUsedBytes(payload) {
   return null;
 }
 
+function extractSubscriptionUrl(payload) {
+  const candidates = [
+    payload?.subscription_url,
+    payload?.subscriptionUrl,
+    payload?.sub_url,
+    payload?.data?.subscription_url,
+    payload?.data?.subscriptionUrl,
+    payload?.data?.sub_url
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
 export function buildClient(panel) {
   const baseUrl = normalizeBaseUrl(panel?.url);
   const username = readCredential(panel, ["username"]);
@@ -197,7 +212,8 @@ export async function createUser(panel, user) {
   return {
     id: payload?.id ?? payload?.data?.id ?? payload?.username ?? user?.username ?? null,
     username: payload?.username ?? payload?.data?.username ?? user?.username ?? null,
-    status: payload?.status ?? payload?.data?.status ?? "active"
+    status: payload?.status ?? payload?.data?.status ?? "active",
+    subscriptionUrl: extractSubscriptionUrl(payload)
   };
 }
 
@@ -278,7 +294,8 @@ export async function getUser(panel, user) {
   const usedBytes = extractUsedBytes(payload);
   return {
     username,
-    usedBytes: usedBytes ?? (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0)
+    usedBytes: usedBytes ?? (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0),
+    subscriptionUrl: extractSubscriptionUrl(payload)
   };
 }
 

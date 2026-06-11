@@ -379,6 +379,13 @@ function singleUserLabel() {
   return isReseller() ? "User" : "VPN account";
 }
 
+function renderSubscriptionLinkAction(user) {
+  if (!user?.subscriptionUrl) {
+    return `<span class="muted">No link</span>`;
+  }
+  return `<button class="ghost" onclick="window.Aegis.copySubscriptionLink('${esc(user.id)}')">Copy Link</button>`;
+}
+
 function dashboard() {
   const totals = state.data?.totals || {};
   const distribution = state.data?.distribution || {};
@@ -386,7 +393,7 @@ function dashboard() {
     const assignedPanel = panelName(state.admin?.panelId);
     const quotaLimit = Number(state.admin?.trafficLimitBytes || 0);
     const quotaRemaining = Number(state.admin?.trafficRemainingBytes ?? state.admin?.trafficLimitBytes ?? 0);
-    const quotaUsed = Math.max(0, quotaLimit - quotaRemaining);
+    const quotaAllocated = state.admin?.trafficRemainingBytes == null ? null : Math.max(0, quotaLimit - quotaRemaining);
     const users = state.users || [];
     return `
       ${pageTitle("Dashboard", "Manage your users, traffic, and remaining validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create User</button>`)}
@@ -396,7 +403,7 @@ function dashboard() {
           ${metric("Assigned Panel", assignedPanel, "scoped panel")}
           ${metric("Remaining Traffic", trafficDisplay(state.admin?.trafficRemainingBytes), "available")}
           ${metric("Validity Left", formatValidityDaysLeft(state.admin?.validUntil), "calendar days")}
-          ${metric("Used Traffic", bytes(quotaUsed), "consumed")}
+          ${metric("Allocated Traffic", quotaAllocated == null ? "Unlimited traffic" : bytes(quotaAllocated), "assigned to users")}
           ${metric("Active Users", users.filter((user) => user.active).length, "currently active")}
           ${metric("Total Users", users.length, "all scoped users")}
         </div>
@@ -426,6 +433,7 @@ function dashboard() {
                     <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                     <td class="row-actions">
                       <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit User</button>
+                      ${renderSubscriptionLinkAction(u)}
                       <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                         ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                       </button>
@@ -560,6 +568,7 @@ function users() {
                   <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                   <td class="row-actions">
                     <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit User</button>
+                    ${renderSubscriptionLinkAction(u)}
                     <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                       ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                     </button>
@@ -592,6 +601,7 @@ function users() {
                 <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                 <td class="row-actions">
                   <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit</button>
+                  ${renderSubscriptionLinkAction(u)}
                   <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                     ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                   </button>
@@ -1815,6 +1825,25 @@ async function syncUserTraffic(id) {
   }
 }
 
+async function copySubscriptionLink(id) {
+  const user = state.users?.find((item) => item.id === id);
+  const link = user?.subscriptionUrl;
+  if (!link) {
+    state.error = "Could not copy subscription link";
+    renderApp();
+    return;
+  }
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(link);
+    state.error = "";
+    state.notice = "Subscription link copied";
+  } catch (error) {
+    state.error = "Could not copy subscription link";
+  }
+  renderApp();
+}
+
 async function deletePanel(id) {
   if (!requireSuperadminUi()) return;
   if (!confirm("Delete this panel?")) return;
@@ -1893,6 +1922,7 @@ window.Aegis = {
   createNews,
   syncPanel,
   syncUserTraffic,
+  copySubscriptionLink,
   loadPanelInbounds,
   deletePanel,
   deleteAdmin,
