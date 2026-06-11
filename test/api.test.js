@@ -1950,7 +1950,7 @@ test("marzban-backed user update updates remote before local state and prefers a
           });
 
           assert.equal(updated.username, "update-user");
-          assert.equal(updated.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+          assert.equal(updated.inboundId, "vless:METRICS_DUMMY:123");
           assert.equal(updated.inboundMode, "custom");
           assert.deepEqual(updated.inboundIds, ["vless:METRICS_DUMMY:123", "vless:Falkenstein VLESS WS TLS:10002"]);
           assert.equal(updated.limitBytes, 400);
@@ -1967,7 +1967,7 @@ test("marzban-backed user update updates remote before local state and prefers a
         session: login.session
       });
       const stored = users.find((user) => user.username === "update-user");
-      assert.equal(stored.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+      assert.equal(stored.inboundId, "vless:METRICS_DUMMY:123");
       assert.equal(stored.inboundMode, "custom");
       assert.equal(stored.limitBytes, 400);
       assert.equal(stored.reservedBytes, 400);
@@ -4246,7 +4246,7 @@ test("marzban-backed create does not store raw config links as subscriptionUrl",
   );
 });
 
-test("marzban createUser keeps metrics in inboundIds but prefers a real inbound for the local primary id", async () => {
+test("marzban createUser keeps selected inbound order for the local primary id", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -4327,7 +4327,7 @@ test("marzban createUser keeps metrics in inboundIds but prefers a real inbound 
           });
 
           assert.equal(created.username, "metrics-preferred-user");
-          assert.equal(created.inboundId, "vless:WS TLS:10002");
+          assert.equal(created.inboundId, "vless:METRICS_DUMMY:123");
           assert.equal(created.inboundMode, "custom");
           assert.deepEqual(created.inboundIds, ["vless:METRICS_DUMMY:123", "vless:WS TLS:10002"]);
         }
@@ -4345,7 +4345,7 @@ test("marzban createUser keeps metrics in inboundIds but prefers a real inbound 
   assert.equal(calls.length, 4);
 });
 
-test("marzban createUser prefers a real inbound even when styled metrics text is selected", async () => {
+test("marzban createUser keeps styled inbound selection order", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -4426,7 +4426,7 @@ test("marzban createUser prefers a real inbound even when styled metrics text is
           });
 
           assert.equal(created.username, "styled-metrics-user");
-          assert.equal(created.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+          assert.equal(created.inboundId, "vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123");
           assert.deepEqual(created.inboundIds, ["vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123", "vless:Falkenstein VLESS WS TLS:10002"]);
         }
       );
@@ -4436,13 +4436,13 @@ test("marzban createUser prefers a real inbound even when styled metrics text is
         session: login.session
       });
       const createdUser = users.find((user) => user.username === "styled-metrics-user");
-      assert.equal(createdUser.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
+      assert.equal(createdUser.inboundId, "vless:𝐌𝐄𝐓𝐑𝐈𝐂𝐒_𝐃𝐔𝐌𝐌𝐘:123");
       assert.equal(calls.length, 4);
     }
   );
 });
 
-test("marzban createUser rejects metrics-only inbound selection before remote create", async () => {
+test("marzban createUser allows metrics-only inbound selection", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -4481,38 +4481,56 @@ test("marzban createUser rejects metrics-only inbound selection before remote cr
         }
       });
 
-      const res = await callApiWithOutcome(handleApi, {
-        method: "POST",
-        pathname: "/api/admin/users",
-        session: login.session,
-        body: {
-          username: "metrics-only-user",
-          panelId: panel.id,
-          ownerAdminId: owner.id,
-          limitBytes: 100,
-          usedBytes: 0,
-          inboundIds: ["vless:METRICS_DUMMY:123"],
-          inboundId: "vless:METRICS_DUMMY:123",
-          expiresAt: "2030-01-02T03:04:05.000Z"
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ username: "metrics-only-user", subscription_url: "https://marzban.example.com/sub/metrics-only-user" })
+          }
+        ],
+        calls,
+        async () => {
+          const res = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "metrics-only-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 100,
+              usedBytes: 0,
+              inboundIds: ["vless:METRICS_DUMMY:123"],
+              inboundId: "vless:METRICS_DUMMY:123",
+              expiresAt: "2030-01-02T03:04:05.000Z"
+            }
+          });
+
+          assert.equal(res.statusCode, 201);
+          assert.equal(res.json.data.inboundId, "vless:METRICS_DUMMY:123");
+          assert.deepEqual(res.json.data.inboundIds, ["vless:METRICS_DUMMY:123"]);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const ownerAfter = admins.find((admin) => admin.username === "metrics-only-owner");
+          assert.equal(ownerAfter.trafficRemainingBytes, 900);
         }
-      });
-
-      assert.equal(res.statusCode, 400);
-      assert.match(res.json.error, /Select a real inbound, not a metrics placeholder\./i);
-
-      const admins = await callApi(handleApi, {
-        method: "GET",
-        pathname: "/api/superadmin/admins",
-        session: login.session
-      });
-      const ownerAfter = admins.find((admin) => admin.username === "metrics-only-owner");
-      assert.equal(ownerAfter.trafficRemainingBytes, 1000);
+      );
     }
   );
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 2);
 });
 
-test("marzban-backed user update rejects metrics-only inbound selection before remote update", async () => {
+test("marzban-backed user update allows metrics-only inbound selection", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -4562,6 +4580,16 @@ test("marzban-backed user update rejects metrics-only inbound selection before r
             ok: true,
             status: 201,
             json: async () => ({ username: "metrics-only-edit-user", subscription_url: "https://marzban.example.com/sub/metrics-only-edit-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "metrics-only-edit-user", subscription_url: "https://marzban.example.com/sub/metrics-only-edit-user" })
           }
         ],
         calls,
@@ -4592,13 +4620,14 @@ test("marzban-backed user update rejects metrics-only inbound selection before r
             }
           });
 
-          assert.equal(res.statusCode, 400);
-          assert.match(res.json.error, /Select a real inbound, not a metrics placeholder\./i);
+          assert.equal(res.statusCode, 200);
+          assert.equal(res.json.data.inboundId, "vless:METRICS_DUMMY:123");
+          assert.deepEqual(res.json.data.inboundIds, ["vless:METRICS_DUMMY:123"]);
         }
       );
     }
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("marzban createUser stores inboundMode all when all selected inbounds are sent", async () => {
@@ -6693,12 +6722,11 @@ test("superadmin sidebar and users copy use customer-user wording", async () => 
   assert.match(usersSource, /No users yet\./);
 });
 
-test("create and edit user forms hide metrics placeholders from selectable Marzban choices", async () => {
+test("create and edit user forms keep Marzban inbounds selectable", async () => {
   const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
-  assert.match(source, /realMarzbanInbounds\(state\.createUserInbounds\)/);
-  assert.match(source, /realMarzbanInbounds\(state\.editUserInbounds\)/);
-  assert.match(source, /Select a real inbound, not a metrics placeholder\./);
-  assert.match(source, /state\.editUserInboundsError = state\.editUserInboundIds\.length > 0 \? "" : "No real inbounds available yet\. Load inbounds before editing this VPN account\.";/);
+  assert.doesNotMatch(source, /realMarzbanInbounds|isDummyOrMetricsInbound/);
+  assert.match(source, /normalMarzbanInboundIds\(inbounds\) \{\n  return \(inbounds \|\| \[\]\)\.map\(\(inbound\) => inbound\.id\);\n\}/);
+  assert.match(source, /preferredMarzbanInboundId\(inboundIds, fallbackId = ""\) \{\n  const selected = Array\.isArray\(inboundIds\) \? inboundIds\.filter\(\(id\) => typeof id === "string" && id\.trim\(\)\) : \[\];\n  return selected\[0\] \|\| fallbackId \|\| "default";\n\}/);
   assert.match(source, /#user-create-error/);
   assert.match(source, /#edit-user-error/);
 });

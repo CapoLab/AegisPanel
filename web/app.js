@@ -1066,14 +1066,13 @@ function createUserInboundField() {
   if (!isMarzban) {
     return `<label>Inbound<input name="inboundId" placeholder="default" value="${esc(state.createUserInboundId || "")}" /></label>`;
   }
-  const inbounds = realMarzbanInbounds(state.createUserInbounds);
   return renderMarzbanInboundPicker({
     title: "Inbounds",
-    inbounds,
+    inbounds: state.createUserInbounds,
     selectedIds: state.createUserInboundIds,
     loading: state.createUserInboundsLoading,
     error: state.createUserInboundsError,
-    emptyMessage: "No real inbounds available yet. Load inbounds before creating a VPN account.",
+    emptyMessage: "No inbounds available yet. Load inbounds before creating a VPN account.",
     toggleAction: "toggleMarzbanInboundSelection",
     selectAllAction: "selectAllMarzbanInbounds",
     clearAction: "clearMarzbanInbounds"
@@ -1122,14 +1121,6 @@ function normalizeInboundSearchText(value) {
   return (typeof normalized.normalize === "function" ? normalized.normalize("NFKC") : normalized).toLowerCase();
 }
 
-function isDummyOrMetricsInbound(inbound) {
-  return /dummy|metrics/i.test(normalizeInboundSearchText(`${inbound?.label || ""} ${inbound?.id || ""}`));
-}
-
-function realMarzbanInbounds(inbounds) {
-  return (inbounds || []).filter((inbound) => !isDummyOrMetricsInbound(inbound));
-}
-
 function vpnAccountInboundMode(user) {
   return user?.inboundMode === "all" ? "All" : "Custom";
 }
@@ -1173,12 +1164,12 @@ function groupMarzbanInbounds(inbounds) {
 }
 
 function normalMarzbanInboundIds(inbounds) {
-  return realMarzbanInbounds(inbounds).map((inbound) => inbound.id);
+  return (inbounds || []).map((inbound) => inbound.id);
 }
 
 function preferredMarzbanInboundId(inboundIds, fallbackId = "") {
-  const real = inboundIds.find((id) => !isDummyOrMetricsInbound({ id }));
-  return real || inboundIds[0] || fallbackId || "default";
+  const selected = Array.isArray(inboundIds) ? inboundIds.filter((id) => typeof id === "string" && id.trim()) : [];
+  return selected[0] || fallbackId || "default";
 }
 
 function displayInboundId(user) {
@@ -1257,7 +1248,7 @@ function protocolKey(value) {
 
 function editUserProtocolInbounds(protocol) {
   const key = protocolKey(protocol);
-  return realMarzbanInbounds(state.editUserInbounds).filter((inbound) => protocolKey(inbound.protocol) === key);
+  return state.editUserInbounds.filter((inbound) => protocolKey(inbound.protocol) === key);
 }
 
 function editUserProtocolSelectedCount(protocolInbounds) {
@@ -1610,11 +1601,13 @@ async function createUser(event) {
       if (state.createUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
-      const selectableInbounds = realMarzbanInbounds(state.createUserInbounds);
+      const selectableInbounds = state.createUserInbounds;
       const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
-      const selectedInbounds = selectableInbounds.filter((inbound) => state.createUserInboundIds.includes(inbound.id));
+      const selectedInbounds = state.createUserInboundIds
+        .map((id) => selectableInbounds.find((inbound) => inbound.id === id))
+        .filter(Boolean);
       if (!selectedInbounds.length) {
-        throw new Error("Select a real inbound, not a metrics placeholder.");
+        throw new Error("Select a Marzban inbound before creating the VPN account.");
       }
       const expiresAt = resolveCreateUserExpiry(form);
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
@@ -1935,12 +1928,11 @@ async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
   try {
     const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
     state.editUserInbounds = rows;
-    const selectable = realMarzbanInbounds(rows);
     const existing = state.editUserInboundIds.length ? state.editUserInboundIds : [state.editUserInboundId].filter(Boolean);
-    const selected = existing.filter((id) => selectable.some((row) => row.id === id));
-    state.editUserInboundIds = selected.length ? selected : selectable.map((row) => row.id);
+    const selected = existing.filter((id) => rows.some((row) => row.id === id));
+    state.editUserInboundIds = selected.length ? selected : rows.map((row) => row.id);
     state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, state.editUserInboundId);
-    state.editUserInboundsError = state.editUserInboundIds.length > 0 ? "" : "No real inbounds available yet. Load inbounds before editing this VPN account.";
+    state.editUserInboundsError = state.editUserInboundIds.length > 0 ? "" : "No inbounds available yet. Load inbounds before editing this VPN account.";
   } catch (error) {
     state.editUserInbounds = [];
     state.editUserInboundIds = [];
@@ -1968,11 +1960,13 @@ async function saveEditUser(event) {
       if (state.editUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
-      const selectableInbounds = realMarzbanInbounds(state.editUserInbounds);
+      const selectableInbounds = state.editUserInbounds;
       const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
-      const selectedInbounds = selectableInbounds.filter((inbound) => state.editUserInboundIds.includes(inbound.id));
+      const selectedInbounds = state.editUserInboundIds
+        .map((id) => selectableInbounds.find((inbound) => inbound.id === id))
+        .filter(Boolean);
       if (!selectedInbounds.length) {
-        throw new Error("Select a real inbound, not a metrics placeholder.");
+        throw new Error("Select a Marzban inbound before saving the VPN account.");
       }
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
       const expiresAt = resolveEditUserExpiry(form);
