@@ -105,6 +105,11 @@ function bytes(value) {
   return `${n} B`;
 }
 
+function trafficDisplay(value) {
+  if (value == null) return "Unlimited traffic";
+  return bytes(value);
+}
+
 function gbToBytes(value) {
   return Math.max(0, Number(value || 0)) * 1024 ** 3;
 }
@@ -155,6 +160,20 @@ function relativeExpiryText(value) {
 function dateShort(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatValidityDaysLeft(validUntil) {
+  if (!validUntil) return "Unlimited validity";
+  const date = new Date(validUntil);
+  if (Number.isNaN(date.getTime())) return "Unlimited validity";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiry = new Date(date);
+  expiry.setHours(0, 0, 0, 0);
+  const diff = Math.round((expiry.getTime() - today.getTime()) / 86400000);
+  if (diff < 0) return "Expired";
+  if (diff === 0) return "Expires today";
+  return `${diff} day${diff === 1 ? "" : "s"} left`;
 }
 
 async function login(event) {
@@ -274,8 +293,8 @@ function renderLogin() {
 function nav() {
   const items = isReseller()
     ? [
-        ["dashboard", "Dashboard", "Your quota and validity"],
-        ["users", "VPN Accounts", "Customers and traffic"]
+        ["dashboard", "Dashboard", "Quota and validity"],
+        ["users", "Users", "Customers and traffic"]
       ]
     : [
         ["dashboard", "Dashboard", "Overview and live totals"],
@@ -299,7 +318,7 @@ function shell(content) {
           <div class="mark">A</div>
           <div>
             <strong>AegisPanel</strong>
-            <span>${esc(state.admin?.username)} / ${esc(roleLabel(state.admin?.role))}${state.admin?.validUntil ? ` · ${esc(dateShort(state.admin.validUntil))}` : ""}</span>
+            <span>${esc(state.admin?.username)} / ${esc(roleLabel(state.admin?.role))}</span>
           </div>
         </div>
         <nav class="nav">${nav()}</nav>
@@ -344,6 +363,22 @@ function roleLabel(role) {
   return role || "-";
 }
 
+function createUserLabel() {
+  return isReseller() ? "Create User" : "Create VPN account";
+}
+
+function editUserLabel() {
+  return isReseller() ? "Edit User" : "Edit VPN account";
+}
+
+function saveUserLabel() {
+  return isReseller() ? "Save User" : "Save VPN account";
+}
+
+function singleUserLabel() {
+  return isReseller() ? "User" : "VPN account";
+}
+
 function dashboard() {
   const totals = state.data?.totals || {};
   const distribution = state.data?.distribution || {};
@@ -354,56 +389,54 @@ function dashboard() {
     const quotaUsed = Math.max(0, quotaLimit - quotaRemaining);
     const users = state.users || [];
     return `
-      ${pageTitle("Dashboard", "Your reseller workspace for quota, validity, and VPN account creation.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
+      ${pageTitle("Dashboard", "Manage your users, traffic, and remaining validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create User</button>`)}
       <section class="card section">
-        <p class="muted section-note">You can create VPN accounts within your assigned quota and validity.</p>
+        <p class="muted section-note">You can create users within your assigned quota and validity.</p>
         <div class="metrics">
           ${metric("Assigned Panel", assignedPanel, "scoped panel")}
-          ${metric("Traffic Limit", state.admin?.trafficLimitBytes == null ? "Unlimited" : bytes(state.admin.trafficLimitBytes), "assigned quota")}
-          ${metric("Traffic Remaining", state.admin?.trafficRemainingBytes == null ? "Unlimited" : bytes(state.admin.trafficRemainingBytes), "available")}
+          ${metric("Remaining Traffic", trafficDisplay(state.admin?.trafficRemainingBytes), "available")}
+          ${metric("Validity Left", formatValidityDaysLeft(state.admin?.validUntil), "calendar days")}
           ${metric("Used Traffic", bytes(quotaUsed), "consumed")}
-          ${metric("Active VPN Accounts", users.filter((user) => user.active).length, "currently active")}
-          ${metric("Total VPN Accounts", users.length, "all scoped accounts")}
+          ${metric("Active Users", users.filter((user) => user.active).length, "currently active")}
+          ${metric("Total Users", users.length, "all scoped users")}
         </div>
         <div class="reseller-summary">
           <table class="table compact-table">
             <tbody>
-              <tr><td>Valid until</td><td>${esc(state.admin?.validUntil ? dateShort(state.admin.validUntil) : "Unlimited")}</td></tr>
-              <tr><td>Panel</td><td>${esc(assignedPanel)}</td></tr>
-              <tr><td>Notes</td><td>VPN account expiry must stay within your reseller validity window.</td></tr>
+              <tr><td>Assigned Panel</td><td>${esc(assignedPanel)}</td></tr>
+              <tr><td>Validity</td><td>${esc(formatValidityDaysLeft(state.admin?.validUntil))}</td></tr>
+              <tr><td>Notes</td><td>User expiry must stay within your reseller validity window.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
       <section class="card section">
-        <div class="card-head"><h3>VPN Accounts</h3><button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button></div>
+        <div class="card-head"><h3>Users</h3><button class="primary" onclick="window.Aegis.showUserForm()">Create User</button></div>
         ${users.length ? `
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>VPN Account</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>User</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 ${users.map((u) => `
                   <tr>
                     <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
-                    <td>${esc(panelName(u.panelId))}</td>
-                    <td>${esc(vpnAccountInboundSummary(u))}</td>
                     <td>${bytes(u.usedBytes)}</td>
                     <td>${bytes(u.limitBytes)}</td>
                     <td>${dateShort(u.expiresAt)}</td>
                     <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
                     <td class="row-actions">
-                      <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit</button>
+                      <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit User</button>
                       <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
                         ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
                       </button>
-                      <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button>
+                      <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete User</button>
                     </td>
                   </tr>
                 `).join("")}
               </tbody>
             </table>
           </div>
-        ` : `<p class="muted">No VPN accounts yet.</p>`}
+        ` : `<p class="muted">No users yet.</p>`}
       </section>
     `;
   }
@@ -508,6 +541,38 @@ function admins() {
 }
 
 function users() {
+  if (isReseller()) {
+    const rows = state.users || [];
+    return `
+      ${pageTitle("Users", "Create and manage customer users within your assigned traffic and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create User</button>`)}
+      <section class="card">
+        <p class="muted section-note">Create and manage customer users within your assigned quota and validity window.</p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>User</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${rows.map((u) => `
+                <tr>
+                  <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
+                  <td>${bytes(u.usedBytes)}</td>
+                  <td>${bytes(u.limitBytes)}</td>
+                  <td>${dateShort(u.expiresAt)}</td>
+                  <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
+                  <td class="row-actions">
+                    <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit User</button>
+                    <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
+                      ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
+                    </button>
+                    <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete User</button>
+                  </td>
+                </tr>
+              `).join("") || emptyRow(6, "No users yet.")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
   return `
     ${pageTitle("VPN Accounts", "Create and manage customer VPN accounts within your assigned quota and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
     <section class="card">
@@ -615,7 +680,8 @@ function modal(title, body) {
 
 function modalPanel(title, body) {
   const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
-  const compact = String(title).toLowerCase().includes("edit vpn account") ? " edit-modal" : "";
+  const titleLower = String(title).toLowerCase();
+  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") ? " edit-modal" : "";
   return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
@@ -676,10 +742,14 @@ function showUserForm() {
   state.createUserInboundId = "";
   state.createUserInboundIds = [];
   state.createUserExpiryDate = "";
-  modal("Create VPN account", createUserModalBody());
+  modal(createUserModalTitle(), createUserModalBody());
   if (isSuperadmin() && state.createUserPanelId) {
     void loadUserInbounds(state.createUserPanelId, { silent: true });
   }
+}
+
+function createUserModalTitle() {
+  return isReseller() ? "Create User" : "Create VPN account";
 }
 
 function createUserModalBody() {
@@ -704,7 +774,7 @@ function createUserSimpleModalBody() {
         </span>
       </label>
       <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
-      <button class="primary" type="submit">Create VPN account</button>
+      <button class="primary" type="submit">${createUserLabel()}</button>
     </form>
   `;
 }
@@ -730,7 +800,7 @@ function createUserAdvancedModalBody() {
         </span>
       </label>
       <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
-      <button class="primary" type="submit">Create VPN account</button>
+      <button class="primary" type="submit">${createUserLabel()}</button>
     </form>
   `;
 }
@@ -757,7 +827,7 @@ function createUserInboundField() {
 function refreshUserInboundField() {
   const field = document.querySelector("#user-inbound-field");
   if (!field) {
-    setModal("Create VPN account", createUserModalBody());
+    setModal(createUserModalTitle(), createUserModalBody());
     return;
   }
   field.innerHTML = createUserInboundField();
@@ -766,7 +836,7 @@ function refreshUserInboundField() {
 function refreshCreateUserError() {
   const field = document.querySelector("#user-create-error");
   if (!field) {
-    setModal("Create VPN account", createUserModalBody());
+    setModal(createUserModalTitle(), createUserModalBody());
     return;
   }
   field.innerHTML = state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : "";
@@ -775,7 +845,7 @@ function refreshCreateUserError() {
 function refreshUserExpiryField() {
   const field = document.querySelector("#user-expiry-field");
   if (!field) {
-    setModal("Create VPN account", createUserModalBody());
+    setModal(createUserModalTitle(), createUserModalBody());
     return;
   }
   field.innerHTML = createUserExpiryField();
@@ -1288,7 +1358,7 @@ async function createUser(event) {
       });
     }
     closeModal();
-    state.notice = "VPN account created";
+    state.notice = `${singleUserLabel()} created`;
     await load();
   } catch (error) {
     state.createUserError = error.message;
@@ -1322,7 +1392,7 @@ function showEditUserForm(id) {
   state.editUserActive = user.active !== false;
   state.editUserProtocolOpen = "";
   state.editUserError = "";
-  modal("Edit VPN account", editUserModalBody());
+  modal(editUserModalTitle(), editUserModalBody());
   if (advanced && panel?.type === "marzban") {
     void loadEditUserInbounds(user.id, user.panelId, { silent: true });
   } else {
@@ -1333,6 +1403,11 @@ function showEditUserForm(id) {
 function editUserModalBody() {
   return isSuperadmin() ? editUserAdvancedModalBody() : editUserSimpleModalBody();
 }
+
+function editUserModalTitle() {
+  return isReseller() ? editUserLabel() : "Edit VPN account";
+}
+
 
 function editUserSimpleModalBody() {
   return `
@@ -1361,7 +1436,7 @@ function editUserSimpleModalBody() {
       </div>
       <div class="edit-user-footer">
         <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
-        <button class="primary" type="submit">Save VPN account</button>
+        <button class="primary" type="submit">${saveUserLabel()}</button>
       </div>
     </form>
   `;
@@ -1399,7 +1474,7 @@ function editUserAdvancedModalBody() {
       <div class="edit-user-side" id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<div class="compact-panel"><div class="card-head compact-head"><h4>Protocols</h4></div><label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label></div>`}</div>
       <div class="edit-user-footer">
         <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
-        <button class="primary" type="submit">Save VPN account</button>
+        <button class="primary" type="submit">${saveUserLabel()}</button>
       </div>
     </form>
   `;
@@ -1416,7 +1491,7 @@ function editUserInboundField() {
 function refreshEditUserInboundField() {
   const field = document.querySelector("#edit-user-inbound-field");
   if (!field) {
-    setModal("Edit VPN account", editUserModalBody());
+    setModal(editUserModalTitle(), editUserModalBody());
     return;
   }
   field.innerHTML = editUserInboundField();
@@ -1462,7 +1537,7 @@ function clearEditUserProtocolInbounds(protocol) {
 function refreshEditUserError() {
   const field = document.querySelector("#edit-user-error");
   if (!field) {
-    setModal("Edit VPN account", editUserModalBody());
+    setModal(editUserModalTitle(), editUserModalBody());
     return;
   }
   field.innerHTML = state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : "";
@@ -1471,7 +1546,7 @@ function refreshEditUserError() {
 function refreshEditUserExpiryField() {
   const field = document.querySelector("#edit-user-expiry-field");
   if (!field) {
-    setModal("Edit VPN account", editUserModalBody());
+    setModal(editUserModalTitle(), editUserModalBody());
     return;
   }
   field.innerHTML = editUserExpiryField();
@@ -1633,7 +1708,7 @@ async function saveEditUser(event) {
       });
     }
     closeModal();
-    state.notice = "VPN account updated";
+    state.notice = `${singleUserLabel()} updated`;
     await load();
   } catch (error) {
     state.editUserError = error.message;
@@ -1730,7 +1805,7 @@ async function syncUserTraffic(id) {
         users: state.users
       };
     }
-    state.notice = "VPN account traffic synced";
+    state.notice = `${singleUserLabel()} traffic synced`;
     state.error = "";
   } catch (error) {
     state.error = error.message || "Traffic sync failed";
@@ -1753,8 +1828,8 @@ async function deleteAdmin(id) {
 }
 
 async function deleteUser(id) {
-  if (!confirm("Delete this VPN account? Remaining traffic will return when enabled.")) return;
-  await runAction(() => api(`/api/admin/users/${id}`, { method: "DELETE" }), "VPN account deleted");
+  if (!confirm(`Delete this ${singleUserLabel().toLowerCase()}? Remaining traffic will return when enabled.`)) return;
+  await runAction(() => api(`/api/admin/users/${id}`, { method: "DELETE" }), `${singleUserLabel()} deleted`);
 }
 
 async function runAction(action, message) {
