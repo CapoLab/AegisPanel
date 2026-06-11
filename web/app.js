@@ -1073,7 +1073,7 @@ function createUserInboundField() {
     selectedIds: state.createUserInboundIds,
     loading: state.createUserInboundsLoading,
     error: state.createUserInboundsError,
-    emptyMessage: "This Marzban panel has no selectable real inbounds yet. Load inbounds before creating a VPN account.",
+    emptyMessage: "No real inbounds available yet. Load inbounds before creating a VPN account.",
     toggleAction: "toggleMarzbanInboundSelection",
     selectAllAction: "selectAllMarzbanInbounds",
     clearAction: "clearMarzbanInbounds"
@@ -1940,7 +1940,7 @@ async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
     const selected = existing.filter((id) => selectable.some((row) => row.id === id));
     state.editUserInboundIds = selected.length ? selected : selectable.map((row) => row.id);
     state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, state.editUserInboundId);
-    state.editUserInboundsError = state.editUserInboundIds.length > 0 ? "" : "This Marzban panel has no selectable real inbounds yet.";
+    state.editUserInboundsError = state.editUserInboundIds.length > 0 ? "" : "No real inbounds available yet. Load inbounds before editing this VPN account.";
   } catch (error) {
     state.editUserInbounds = [];
     state.editUserInboundIds = [];

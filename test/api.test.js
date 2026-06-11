@@ -6698,7 +6698,9 @@ test("create and edit user forms hide metrics placeholders from selectable Marzb
   assert.match(source, /realMarzbanInbounds\(state\.createUserInbounds\)/);
   assert.match(source, /realMarzbanInbounds\(state\.editUserInbounds\)/);
   assert.match(source, /Select a real inbound, not a metrics placeholder\./);
-  assert.match(source, /state\.editUserInboundsError = state\.editUserInboundIds\.length > 0 \? "" : "This Marzban panel has no selectable real inbounds yet\.";/);
+  assert.match(source, /state\.editUserInboundsError = state\.editUserInboundIds\.length > 0 \? "" : "No real inbounds available yet\. Load inbounds before editing this VPN account\.";/);
+  assert.match(source, /#user-create-error/);
+  assert.match(source, /#edit-user-error/);
 });
 
 test("a superadmin cannot delete itself", async () => {

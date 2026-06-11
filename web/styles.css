@@ -1332,6 +1332,19 @@ small {
   margin: 0;
 }
 
+.create-user-form #user-create-error .alert,
+.edit-user-form #edit-user-error .alert {
+  margin-top: 2px;
+  border-radius: 10px;
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.create-user-form #user-create-error,
+.edit-user-form #edit-user-error {
+  min-height: 0;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.86rem;
