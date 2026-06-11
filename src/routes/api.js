@@ -19,6 +19,29 @@ function publicAdmin(admin) {
   return safe;
 }
 
+function adminTrafficStats(admin) {
+  const ownedUsers = store.list("users").filter((user) => user.ownerAdminId === admin.id);
+  const allocatedTrafficBytes = ownedUsers.reduce((sum, user) => {
+    const reserved = finiteQuotaBytes(user.reservedBytes);
+    const limit = finiteQuotaBytes(user.limitBytes);
+    return sum + Math.max(0, reserved ?? limit ?? 0);
+  }, 0);
+  const usedTrafficBytes = ownedUsers.reduce((sum, user) => sum + Math.max(0, finiteQuotaBytes(user.usedBytes) ?? 0), 0);
+  return {
+    userCount: ownedUsers.length,
+    allocatedTrafficBytes,
+    usedTrafficBytes,
+    remainingTrafficBytes: finiteQuotaBytes(admin.trafficRemainingBytes)
+  };
+}
+
+function adminWithMetrics(admin) {
+  return {
+    ...publicAdmin(admin),
+    ...adminTrafficStats(admin)
+  };
+}
+
 function publicPanel(panel) {
   const { username, secret, apiKey, token, credentials, password, ...safe } = panel;
   return safe;
@@ -73,6 +96,17 @@ function validateHttpUrl(value, key, { allowEmpty = false } = {}) {
 
 function parseOptionalNonNegativeNumber(value, key, fallback) {
   if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  return parsed;
+}
+
+function parseNullableNonNegativeNumber(value, key) {
+  if (value == null || value === "") return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     const error = new Error(`Invalid ${key}`);
@@ -438,7 +472,7 @@ export async function handleApi(req, res, route) {
 
   if (method === "GET" && pathname === "/api/superadmin/admins") {
     requireAuth(req, "superadmin");
-    return sendJson(res, 200, { ok: true, data: store.list("admins").map(publicAdmin) });
+    return sendJson(res, 200, { ok: true, data: store.list("admins").map(adminWithMetrics) });
   }
 
   if (method === "POST" && pathname === "/api/superadmin/admins") {
@@ -472,13 +506,82 @@ export async function handleApi(req, res, route) {
   if (adminId && method === "PUT") {
     const superadmin = requireAuth(req, "superadmin");
     const body = await readJson(req);
-    const patch = { ...body };
-    if (body.password) patch.passwordHash = hashPassword(body.password);
-    delete patch.password;
-    const admin = store.update("admins", adminId.id, patch);
+    const admin = store.find("admins", adminId.id);
     if (!admin) return sendJson(res, 404, { ok: false, error: "Admin not found" });
+    if (admin.role !== "admin") {
+      return sendJson(res, 400, { ok: false, error: "Only reseller accounts can be edited here" });
+    }
+    if (admin.id === superadmin.id) {
+      return sendJson(res, 400, { ok: false, error: "You cannot edit your own account" });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "username")) {
+      const requestedUsername = requiredString(body, "username");
+      if (requestedUsername !== admin.username) {
+        return sendJson(res, 400, { ok: false, error: "Username cannot be changed" });
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "role") && body.role !== admin.role) {
+      return sendJson(res, 400, { ok: false, error: "Role cannot be changed" });
+    }
+    const ownedUsers = store.list("users").filter((user) => user.ownerAdminId === admin.id);
+    const allocatedTrafficBytes = ownedUsers.reduce((sum, user) => {
+      const reserved = finiteQuotaBytes(user.reservedBytes);
+      const limit = finiteQuotaBytes(user.limitBytes);
+      return sum + Math.max(0, reserved ?? limit ?? 0);
+    }, 0);
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(body, "panelId")) {
+      if (body.panelId == null || body.panelId === "") {
+        patch.panelId = null;
+      } else {
+        const panel = store.find("panels", body.panelId);
+        if (!panel) return sendJson(res, 400, { ok: false, error: "Panel not found" });
+        patch.panelId = panel.id;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "active")) patch.active = body.active !== false;
+    const limitProvided = Object.prototype.hasOwnProperty.call(body, "trafficLimitBytes");
+    const remainingProvided = Object.prototype.hasOwnProperty.call(body, "trafficRemainingBytes");
+    const requestedLimitBytes = limitProvided ? parseNullableNonNegativeNumber(body.trafficLimitBytes, "trafficLimitBytes") : finiteQuotaBytes(admin.trafficLimitBytes);
+    const currentRemainingBytes = finiteQuotaBytes(admin.trafficRemainingBytes);
+    let requestedRemainingBytes = remainingProvided ? parseNullableNonNegativeNumber(body.trafficRemainingBytes, "trafficRemainingBytes") : currentRemainingBytes;
+    if (requestedLimitBytes != null && requestedLimitBytes < allocatedTrafficBytes) {
+      return sendJson(res, 400, { ok: false, error: "Traffic limit cannot be below allocated user traffic." });
+    }
+    if (requestedLimitBytes == null) {
+      if (remainingProvided && requestedRemainingBytes != null) {
+        return sendJson(res, 400, { ok: false, error: "Traffic remaining bytes must be null when traffic limit is unlimited." });
+      }
+      requestedRemainingBytes = null;
+    } else {
+      if (remainingProvided && requestedRemainingBytes == null) {
+        return sendJson(res, 400, { ok: false, error: "Traffic remaining bytes cannot be null when traffic limit is limited." });
+      }
+      if (!remainingProvided && requestedRemainingBytes == null) {
+        requestedRemainingBytes = currentRemainingBytes != null ? currentRemainingBytes : requestedLimitBytes;
+      }
+      if (requestedRemainingBytes != null && requestedRemainingBytes > requestedLimitBytes) {
+        return sendJson(res, 400, { ok: false, error: "Traffic remaining bytes cannot exceed traffic limit." });
+      }
+    }
+    if (limitProvided) patch.trafficLimitBytes = requestedLimitBytes;
+    if (remainingProvided || requestedLimitBytes == null || currentRemainingBytes !== requestedRemainingBytes) {
+      patch.trafficRemainingBytes = requestedRemainingBytes;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "validUntil") || Object.prototype.hasOwnProperty.call(body, "expiresAt")) {
+      const validity = normalizeIsoDateOrNull(body.validUntil ?? body.expiresAt, "validUntil", { allowPast: true });
+      patch.validUntil = validity;
+      patch.expiresAt = validity;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "deleteReturnTraffic")) patch.deleteReturnTraffic = body.deleteReturnTraffic !== false;
+    if (Object.prototype.hasOwnProperty.call(body, "updateReturnTraffic")) patch.updateReturnTraffic = body.updateReturnTraffic !== false;
+    if (Object.prototype.hasOwnProperty.call(body, "password") && typeof body.password === "string" && body.password.trim()) {
+      patch.passwordHash = hashPassword(body.password);
+    }
+    const updated = store.update("admins", adminId.id, patch);
+    if (!updated) return sendJson(res, 404, { ok: false, error: "Admin not found" });
     store.audit(superadmin, "admin.update", admin.id);
-    return sendJson(res, 200, { ok: true, data: publicAdmin(admin) });
+    return sendJson(res, 200, { ok: true, data: publicAdmin(updated) });
   }
 
   if (adminId && method === "DELETE") {

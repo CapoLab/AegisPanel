@@ -15,6 +15,16 @@ const state = {
   editPanel: null,
   editPanelLoading: false,
   editPanelError: "",
+  editAdminId: "",
+  editAdminUsername: "",
+  editAdminPanelId: "",
+  editAdminLimitGb: "",
+  editAdminRemainingGb: "",
+  editAdminValidUntilDate: "",
+  editAdminActive: true,
+  editAdminDeleteReturnTraffic: true,
+  editAdminUpdateReturnTraffic: true,
+  editAdminError: "",
   createUserPanelId: "",
   createUserInbounds: [],
   createUserInboundsLoading: false,
@@ -225,6 +235,16 @@ function logout() {
   state.editPanel = null;
   state.editPanelLoading = false;
   state.editPanelError = "";
+  state.editAdminId = "";
+  state.editAdminUsername = "";
+  state.editAdminPanelId = "";
+  state.editAdminLimitGb = "";
+  state.editAdminRemainingGb = "";
+  state.editAdminValidUntilDate = "";
+  state.editAdminActive = true;
+  state.editAdminDeleteReturnTraffic = true;
+  state.editAdminUpdateReturnTraffic = true;
+  state.editAdminError = "";
   state.editUserId = "";
   state.editUserUsername = "";
   state.editUserPanelId = "";
@@ -345,7 +365,8 @@ function shell(content) {
   `;
 }
 
-function pageTitle(title, subtitle, action = "") {
+function pageTitle(title, subtitle, action = "", options = {}) {
+  const showRefresh = options.showRefresh !== false;
   return `
     <header class="topbar">
       <div>
@@ -354,7 +375,7 @@ function pageTitle(title, subtitle, action = "") {
         <p class="muted">${subtitle}</p>
       </div>
       <div class="actions">
-        <button class="ghost" onclick="window.Aegis.load()">Refresh</button>
+        ${showRefresh ? `<button class="ghost" onclick="window.Aegis.load()">Refresh</button>` : ""}
         ${action}
       </div>
     </header>
@@ -571,26 +592,29 @@ function panels() {
 }
 
 function admins() {
+  const rows = (state.admins || []).filter((admin) => admin.role === "admin");
   return `
-    ${pageTitle("Resellers", "Manage super admins and reseller accounts with traffic quota and validity windows.", `<button class="primary" onclick="window.Aegis.showAdminForm()">New reseller</button>`)}
+    ${pageTitle("Resellers", "Manage reseller accounts with traffic quota and validity windows.", `<button class="primary" onclick="window.Aegis.showAdminForm()">New reseller</button>`, { showRefresh: false })}
     <section class="card">
       <p class="muted section-note">Resellers receive quota and validity from SuperAdmin. Future reseller limits should stay within the assigned validity window.</p>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Username</th><th>Role</th><th>Valid until</th><th>Panel</th><th>Traffic</th><th>Return</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Username</th><th>Panel</th><th>Users</th><th>Allocated</th><th>Used</th><th>Remaining</th><th>Limit</th><th>Valid until</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            ${state.admins.map((a) => `
+            ${rows.map((a) => `
               <tr>
                 <td><strong>${esc(a.username)}</strong></td>
-                <td><span class="badge">${esc(roleLabel(a.role))}</span></td>
-                <td>${esc(a.validUntil ? dateShort(a.validUntil) : "Unlimited")}</td>
                 <td>${esc(panelName(a.panelId))}</td>
-                <td>${a.trafficLimitBytes ? bytes(a.trafficLimitBytes) : "Unlimited"}</td>
-                <td>${a.deleteReturnTraffic ? "Delete" : "-"} ${a.updateReturnTraffic ? "Update" : ""}</td>
+                <td>${a.userCount ?? 0}</td>
+                <td>${bytes(a.allocatedTrafficBytes ?? 0)}</td>
+                <td>${bytes(a.usedTrafficBytes ?? 0)}</td>
+                <td>${trafficDisplay(a.remainingTrafficBytes)}</td>
+                <td>${trafficDisplay(a.trafficLimitBytes)}</td>
+                <td>${esc(formatValidityDaysLeft(a.validUntil))}</td>
                 <td><span class="badge ${a.active ? "green" : "red"}">${a.active ? "Active" : "Off"}</span></td>
-                <td class="row-actions">${a.role === "superadmin" ? "" : `<button class="danger-btn" onclick="window.Aegis.deleteAdmin('${a.id}')">Delete</button>`}</td>
+                <td class="row-actions">${iconActionButton("✎", "Edit reseller", `window.Aegis.showEditAdminForm('${esc(a.id)}')`, { className: "edit-action" })}${iconActionButton("🗑", "Delete reseller", `window.Aegis.deleteAdmin('${esc(a.id)}')`, { className: "delete-action" })}</td>
               </tr>
-            `).join("")}
+            `).join("") || emptyRow(10, "No resellers yet.")}
           </tbody>
         </table>
       </div>
@@ -602,7 +626,7 @@ function users() {
   if (isReseller()) {
     const rows = state.users || [];
     return `
-      ${pageTitle("Users", "Create and manage customer users within your assigned traffic and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create User</button>`)}
+      ${pageTitle("Users", "Create and manage customer users within your assigned traffic and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create User</button>`, { showRefresh: false })}
       <section class="card">
         <p class="muted section-note">Create and manage customer users within your assigned quota and validity window.</p>
         <div class="table-wrap">
@@ -626,9 +650,9 @@ function users() {
     `;
   }
   return `
-    ${pageTitle("VPN Accounts", "Create and manage customer VPN accounts within your assigned quota and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
+    ${pageTitle("Users", "Customer users and owner visibility across assigned quota and validity.", "", { showRefresh: false })}
     <section class="card">
-      <p class="muted section-note">VPN accounts are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
+      <p class="muted section-note">Customer users are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>VPN Account</th><th>Owner / Reseller</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
@@ -728,7 +752,7 @@ function modal(title, body) {
 function modalPanel(title, body) {
   const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
   const titleLower = String(title).toLowerCase();
-  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") ? " edit-modal" : "";
+  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") || titleLower.includes("edit reseller") ? " edit-modal" : "";
   return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
@@ -833,6 +857,134 @@ function showAdminForm() {
       <button class="primary" type="submit">Create reseller</button>
     </form>
   `);
+}
+
+function showEditAdminForm(id) {
+  if (!requireSuperadminUi()) return;
+  const admin = (state.admins || []).find((item) => item.id === id);
+  if (!admin || admin.role !== "admin") {
+    state.error = "Reseller not found";
+    renderApp();
+    return;
+  }
+  state.error = "";
+  state.notice = "";
+  state.editAdminId = admin.id;
+  state.editAdminUsername = admin.username || "";
+  state.editAdminPanelId = admin.panelId || "";
+  state.editAdminLimitGb = admin.trafficLimitBytes == null ? "" : bytesToGbInputValue(admin.trafficLimitBytes);
+  state.editAdminRemainingGb = admin.trafficRemainingBytes == null
+    ? (admin.trafficLimitBytes == null ? "" : bytesToGbInputValue(admin.trafficLimitBytes))
+    : bytesToGbInputValue(admin.trafficRemainingBytes);
+  state.editAdminValidUntilDate = normalizeDateInputValue(admin.validUntil ?? admin.expiresAt);
+  state.editAdminActive = admin.active !== false;
+  state.editAdminDeleteReturnTraffic = admin.deleteReturnTraffic !== false;
+  state.editAdminUpdateReturnTraffic = admin.updateReturnTraffic !== false;
+  state.editAdminError = "";
+  modal("Edit reseller", editAdminModalBody());
+}
+
+function editAdminModalBody() {
+  const panelOptions = (state.data?.panels || []).map((panel) => `<option value="${panel.id}"${panel.id === state.editAdminPanelId ? " selected" : ""}>${esc(panel.name)}</option>`).join("");
+  return `
+    <form class="form edit-panel-form edit-admin-form" onsubmit="window.Aegis.saveAdmin(event)">
+      <div class="edit-panel-main">
+        <label>Username<input name="username" readonly value="${esc(state.editAdminUsername)}" /></label>
+        <label>Assigned Panel<select name="panelId"><option value=""${state.editAdminPanelId ? "" : " selected"}>No fixed panel</option>${panelOptions}</select></label>
+        <label class="unit-field">
+          <span>Traffic limit (GB)</span>
+          <div class="unit-input">
+            <input name="trafficLimitGb" type="number" min="0" step="any" value="${esc(state.editAdminLimitGb)}" />
+            <span>GB</span>
+          </div>
+        </label>
+        <label class="unit-field">
+          <span>Traffic remaining (GB)</span>
+          <div class="unit-input">
+            <input name="trafficRemainingGb" type="number" min="0" step="any" value="${esc(state.editAdminRemainingGb)}" />
+            <span>GB</span>
+          </div>
+        </label>
+        <label>Valid until<input name="validUntilDate" type="date" value="${esc(state.editAdminValidUntilDate)}" /></label>
+      </div>
+      <div class="edit-panel-side">
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>${state.editAdminActive ? "Reseller is active" : "Reseller is disabled"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox"${state.editAdminActive ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label class="switch-field">
+          <span>
+            <strong>Return traffic on delete</strong>
+            <small>${state.editAdminDeleteReturnTraffic ? "Traffic is returned on delete" : "Traffic is not returned on delete"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="deleteReturnTraffic" type="checkbox"${state.editAdminDeleteReturnTraffic ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label class="switch-field">
+          <span>
+            <strong>Return traffic on update</strong>
+            <small>${state.editAdminUpdateReturnTraffic ? "Traffic is returned on update" : "Traffic is not returned on update"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="updateReturnTraffic" type="checkbox"${state.editAdminUpdateReturnTraffic ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label>New password<input name="password" type="password" placeholder="Leave blank to keep existing" /></label>
+      </div>
+      <div class="edit-panel-footer">
+        <div id="edit-admin-error">${state.editAdminError ? `<p class="alert danger">${esc(state.editAdminError)}</p>` : ""}</div>
+        <button class="primary" type="submit">Save reseller</button>
+      </div>
+    </form>
+  `;
+}
+
+function refreshEditAdminError() {
+  const field = document.querySelector("#edit-admin-error");
+  if (!field) {
+    setModal("Edit reseller", editAdminModalBody());
+    return;
+  }
+  field.innerHTML = state.editAdminError ? `<p class="alert danger">${esc(state.editAdminError)}</p>` : "";
+}
+
+async function saveAdmin(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  state.error = "";
+  state.editAdminError = "";
+  refreshEditAdminError();
+  try {
+    await api(`/api/superadmin/admins/${state.editAdminId}`, {
+      method: "PUT",
+      body: {
+        username: form.get("username"),
+        panelId: form.get("panelId") || null,
+        trafficLimitBytes: form.get("trafficLimitGb") === "" ? null : gbToBytes(form.get("trafficLimitGb")),
+        trafficRemainingBytes: form.get("trafficRemainingGb") === "" ? null : gbToBytes(form.get("trafficRemainingGb")),
+        validUntil: resolveLocalDateEndOfDay(form.get("validUntilDate")),
+        active: form.has("active"),
+        deleteReturnTraffic: form.has("deleteReturnTraffic"),
+        updateReturnTraffic: form.has("updateReturnTraffic"),
+        password: form.get("password") || ""
+      }
+    });
+    closeModal();
+    state.notice = "Reseller updated";
+    await load();
+  } catch (error) {
+    state.editAdminError = error.message;
+    refreshEditAdminError();
+  }
 }
 
 function showUserForm() {
@@ -2028,12 +2180,14 @@ window.Aegis = {
   showPanelForm,
   showEditPanelForm,
   showAdminForm,
+  showEditAdminForm,
   showUserForm,
   showEditUserForm,
   showNewsForm,
   createPanel,
   savePanel,
   createAdmin,
+  saveAdmin,
   createUser,
   saveEditUser,
   loadUserInbounds,

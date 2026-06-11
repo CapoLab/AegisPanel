@@ -5598,6 +5598,418 @@ test("superadmin create still requires panelId", async () => {
   );
 });
 
+test("superadmin admins API returns reseller metrics and role distinction", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Metrics Panel",
+          type: "tx-ui",
+          url: "https://metrics.example.com"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "metrics-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          validUntil: "2035-01-02T23:59:59.000Z"
+        }
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "metrics-user-a",
+          panelId: panel.id,
+          ownerAdminId: reseller.id,
+          limitBytes: 100,
+          expiresAt: "2030-01-02T23:59:59.000Z",
+          note: "a"
+        }
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "metrics-user-b",
+          panelId: panel.id,
+          ownerAdminId: reseller.id,
+          limitBytes: 150,
+          expiresAt: "2030-01-02T23:59:59.000Z",
+          note: "b"
+        }
+      });
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const resellerRow = admins.find((admin) => admin.username === reseller.username);
+      assert.equal(resellerRow.role, "admin");
+      assert.equal(resellerRow.userCount, 2);
+      assert.equal(resellerRow.allocatedTrafficBytes, 250);
+      assert.equal(resellerRow.usedTrafficBytes, 0);
+      assert.equal(resellerRow.remainingTrafficBytes, 750);
+      assert.equal(resellerRow.trafficLimitBytes, 1000);
+      assert.equal(admins.some((admin) => admin.role === "superadmin"), true);
+    }
+  );
+});
+
+test("superadmin can edit reseller quota, panel, validity, and return policies", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panelA = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Panel A", type: "tx-ui", url: "https://panel-a.example.com" }
+      });
+      const panelB = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Panel B", type: "tx-ui", url: "https://panel-b.example.com" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "editable-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panelA.id,
+          trafficLimitBytes: 1000,
+          trafficRemainingBytes: 800,
+          validUntil: "2035-01-02T23:59:59.000Z",
+          deleteReturnTraffic: true,
+          updateReturnTraffic: true
+        }
+      });
+
+      const updated = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/admins/${reseller.id}`,
+        session: login.session,
+        body: {
+          username: reseller.username,
+          panelId: panelB.id,
+          trafficLimitBytes: 2000,
+          trafficRemainingBytes: 1500,
+          validUntil: "2035-02-03T23:59:59.000Z",
+          active: false,
+          deleteReturnTraffic: false,
+          updateReturnTraffic: false,
+          password: "new-pass"
+        }
+      });
+
+      assert.equal(updated.panelId, panelB.id);
+      assert.equal(updated.trafficLimitBytes, 2000);
+      assert.equal(updated.trafficRemainingBytes, 1500);
+      assert.equal(updated.validUntil, "2035-02-03T23:59:59.000Z");
+      assert.equal(updated.active, false);
+      assert.equal(updated.deleteReturnTraffic, false);
+      assert.equal(updated.updateReturnTraffic, false);
+
+      const stored = store.find("admins", reseller.id);
+      assert.equal(stored.panelId, panelB.id);
+      assert.equal(stored.trafficLimitBytes, 2000);
+      assert.equal(stored.trafficRemainingBytes, 1500);
+      assert.equal(stored.validUntil, "2035-02-03T23:59:59.000Z");
+      assert.equal(verifyPassword("new-pass", stored.passwordHash), true);
+    }
+  );
+});
+
+test("empty reseller password preserves the existing credential", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Password Panel", type: "tx-ui", url: "https://password.example.com" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "password-preserve",
+          password: "old-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const beforeHash = store.find("admins", reseller.id).passwordHash;
+
+      await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/admins/${reseller.id}`,
+        session: login.session,
+        body: {
+          username: reseller.username,
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          trafficRemainingBytes: 1000,
+          validUntil: "2035-01-02T23:59:59.000Z",
+          password: ""
+        }
+      });
+
+      const stored = store.find("admins", reseller.id);
+      assert.equal(stored.passwordHash, beforeHash);
+      assert.equal(verifyPassword("old-pass", stored.passwordHash), true);
+    }
+  );
+});
+
+test("non-empty reseller password updates the stored credential", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Password Update Panel", type: "tx-ui", url: "https://password-update.example.com" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "password-update",
+          password: "old-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+
+      await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/admins/${reseller.id}`,
+        session: login.session,
+        body: {
+          username: reseller.username,
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          trafficRemainingBytes: 1000,
+          validUntil: "2035-01-02T23:59:59.000Z",
+          password: "new-pass"
+        }
+      });
+
+      const stored = store.find("admins", reseller.id);
+      assert.equal(verifyPassword("new-pass", stored.passwordHash), true);
+      assert.equal(verifyPassword("old-pass", stored.passwordHash), false);
+    }
+  );
+});
+
+test("traffic limit below allocated user traffic is rejected for reseller edits", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Quota Panel", type: "tx-ui", url: "https://quota.example.com" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "quota-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "quota-user-a",
+          panelId: panel.id,
+          ownerAdminId: reseller.id,
+          limitBytes: 100,
+          expiresAt: "2030-01-02T23:59:59.000Z"
+        }
+      });
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "quota-user-b",
+          panelId: panel.id,
+          ownerAdminId: reseller.id,
+          limitBytes: 150,
+          expiresAt: "2030-01-02T23:59:59.000Z"
+        }
+      });
+
+      const res = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/admins/${reseller.id}`,
+        session: login.session,
+        body: {
+          username: reseller.username,
+          panelId: panel.id,
+          trafficLimitBytes: 200,
+          trafficRemainingBytes: 200,
+          validUntil: "2035-01-02T23:59:59.000Z"
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Traffic limit cannot be below allocated user traffic/i);
+      const stored = store.find("admins", reseller.id);
+      assert.equal(stored.trafficLimitBytes, 1000);
+      assert.equal(stored.trafficRemainingBytes, 750);
+    }
+  );
+});
+
+test("non-superadmin cannot edit a reseller", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: { name: "Permissions Panel", type: "tx-ui", url: "https://permissions.example.com" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "permissions-reseller",
+          password: "reseller-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      const res = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/admins/${reseller.id}`,
+        session: resellerLogin.session,
+        body: {
+          username: reseller.username,
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          trafficRemainingBytes: 1000,
+          validUntil: "2035-01-02T23:59:59.000Z"
+        }
+      });
+      assert.equal(res.statusCode, 403);
+      assert.match(res.json.error, /Insufficient permissions/i);
+    }
+  );
+});
+
 test("missing panel returns 404 for inbounds", async () => {
   await withTempEnv(
     {
