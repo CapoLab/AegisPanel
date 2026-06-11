@@ -460,7 +460,6 @@ function isValidSubscriptionUrl(value) {
 
 function dashboard() {
   const totals = state.data?.totals || {};
-  const distribution = state.data?.distribution || {};
   if (isReseller()) {
     const assignedPanel = panelName(state.admin?.panelId);
     const quotaLimit = Number(state.admin?.trafficLimitBytes || 0);
@@ -521,40 +520,16 @@ function dashboard() {
     `;
   }
   return `
-    ${pageTitle("Unified Dashboard", "A clean control room for panels, resellers, customer users, traffic, and operations.")}
+    ${pageTitle("Dashboard", "Overview of panels, resellers, users, and traffic.")}
     <section class="metrics">
       ${metric("Resellers", totals.resellers, "reseller accounts")}
       ${metric("Panels", totals.panels, "registered upstreams")}
       ${metric("Users", totals.users, `${totals.activeUsers || 0} active users`)}
       ${metric("Traffic Used", bytes(totals.usedBytes), `${bytes(totals.limitBytes)} allocated to users`)}
     </section>
-    <section class="split">
-      <article class="card">
-        <div class="card-head"><h3>Panel adapters</h3><span class="pill">${state.meta?.panelTypes?.length || 0} supported</span></div>
-        <div class="adapter-grid">
-          ${(state.meta?.panelTypes || []).map((p) => `
-            <div class="adapter">
-              <strong>${esc(p.label)}</strong>
-              <small>${esc(p.type)}</small>
-              <p>${p.capabilities.map(esc).join(" · ")}</p>
-            </div>
-          `).join("")}
-        </div>
-      </article>
-      <article class="card">
-        <div class="card-head"><h3>Release mode</h3><span class="pill green">${esc(distribution.status || "free")}</span></div>
-        <table class="table compact-table">
-          <tbody>
-            <tr><td>Edition</td><td>${esc(distribution.edition || "community")}</td></tr>
-            <tr><td>Paid checks</td><td>${esc(distribution.monetization || "disabled")}</td></tr>
-            <tr><td>Seat target</td><td>${esc(distribution.seats || 3)}</td></tr>
-          </tbody>
-        </table>
-      </article>
-    </section>
     <section class="card section">
-      <div class="card-head"><h3>Recent activity</h3><span class="muted">last audit events</span></div>
-      ${logsTable(state.logs.slice(0, 6))}
+      <div class="card-head"><h3>Recent activity</h3><span class="muted">latest audit events</span></div>
+      ${logsTable(state.logs.slice(0, 5))}
     </section>
   `;
 }

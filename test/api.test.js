@@ -6714,6 +6714,7 @@ test("dashboard totals count reseller accounts only", async () => {
 test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
   const roleViewsSource = source.slice(source.indexOf("function roleScopedViews()"), source.indexOf("function requireSuperadminUi()"));
+  const dashboardSource = source.slice(source.indexOf("function dashboard()"), source.indexOf("function panels()"));
   const navSource = source.slice(source.indexOf("function nav()"), source.indexOf("function shell("));
   const usersSource = source.slice(source.indexOf("function users()"), source.indexOf("function operations()"));
   assert.match(roleViewsSource, /return isReseller\(\) \? \["dashboard", "users"\] : \["dashboard", "panels", "admins", "operations"\];/);
@@ -6729,13 +6730,19 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.match(resellerNav[1], /\["dashboard", "Dashboard", "Quota and validity"\]/);
   assert.match(resellerNav[1], /\["users", "Users", "Customers and traffic"\]/);
   assert.doesNotMatch(resellerNav[1], /Panels|Resellers|Operations/);
+  assert.match(dashboardSource, /pageTitle\("Dashboard", "Overview of panels, resellers, users, and traffic\."\)/);
+  assert.doesNotMatch(dashboardSource, /Unified Dashboard/);
+  assert.doesNotMatch(dashboardSource, /Panel adapters/);
+  assert.doesNotMatch(dashboardSource, /Release mode/);
+  assert.match(dashboardSource, /<div class="card-head"><h3>Recent activity<\/h3><span class="muted">latest audit events<\/span><\/div>/);
+  assert.match(dashboardSource, /logsTable\(state\.logs\.slice\(0, 5\)\)/);
   assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);
   assert.match(usersSource, /<th>User<\/th>/);
   assert.match(usersSource, /No users yet\./);
 });
 
 test("create and edit user forms keep Marzban inbounds selectable", async () => {
-  const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  const source = (await readFile(join(process.cwd(), "web/app.js"), "utf8")).replace(/\r\n/g, "\n");
   assert.doesNotMatch(source, /realMarzbanInbounds|isDummyOrMetricsInbound/);
   assert.match(source, /normalMarzbanInboundIds\(inbounds\) \{\n  return \(inbounds \|\| \[\]\)\.map\(\(inbound\) => inbound\.id\);\n\}/);
   assert.match(source, /preferredMarzbanInboundId\(inboundIds, fallbackId = ""\) \{\n  const selected = Array\.isArray\(inboundIds\) \? inboundIds\.filter\(\(id\) => typeof id === "string" && id\.trim\(\)\) : \[\];\n  return selected\[0\] \|\| fallbackId \|\| "default";\n\}/);
