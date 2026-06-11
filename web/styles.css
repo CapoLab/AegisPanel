@@ -715,175 +715,418 @@ small {
   display: none;
 }
 
+.modal.edit-modal {
+  width: min(940px, 100%);
+}
+
+.modal.edit-modal .card-head {
+  margin-bottom: 10px;
+}
+
+.modal.edit-modal .card-head h3 {
+  font-size: 1.02rem;
+}
+
+.modal.edit-modal .card-head .ghost {
+  padding: 7px 10px;
+}
+
 .edit-user-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 10px;
+  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
+  gap: 14px;
 }
 
-.edit-user-form > label,
-.edit-user-form #edit-user-inbound-field,
-.edit-user-form #edit-user-expiry-field,
-.edit-user-form #edit-user-error,
-.edit-user-form > button.primary {
-  grid-column: 1 / -1;
+.edit-user-form.edit-user-simple {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.edit-user-form > label {
+.edit-user-main,
+.edit-user-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.edit-user-main > label,
+.edit-user-main > div,
+.edit-user-side > div {
+  min-width: 0;
+}
+
+.edit-user-main > label {
   gap: 4px;
   color: var(--muted);
   font-size: 0.78rem;
 }
 
-.edit-user-form input,
-.edit-user-form select,
-.edit-user-form textarea {
+.edit-user-main input,
+.edit-user-main select,
+.edit-user-main textarea,
+.compact-panel input,
+.compact-panel select,
+.compact-panel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
+  color: var(--text);
   background: var(--surface-2);
 }
 
-.edit-user-form input[readonly] {
+.edit-user-main textarea,
+.compact-panel textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.edit-user-main input[readonly] {
   opacity: 0.94;
 }
 
-.edit-user-form input:hover,
-.edit-user-form select:hover,
-.edit-user-form textarea:hover {
+.edit-user-main input:hover,
+.edit-user-main select:hover,
+.edit-user-main textarea:hover,
+.compact-panel input:hover,
+.compact-panel select:hover,
+.compact-panel textarea:hover {
   border-color: rgba(148, 163, 184, 0.24);
 }
 
-.edit-user-form input:focus,
-.edit-user-form select:focus,
-.edit-user-form textarea:focus {
+.edit-user-main input:focus,
+.edit-user-main select:focus,
+.edit-user-main textarea:focus,
+.compact-panel input:focus,
+.compact-panel select:focus,
+.compact-panel textarea:focus {
   border-color: rgba(59, 130, 246, 0.5);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08);
   outline: none;
 }
 
-.edit-user-form .inline-check {
+.unit-field {
+  display: grid;
+  gap: 4px;
+}
+
+.unit-field > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.unit-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.unit-input input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.unit-input span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  border-left: 1px solid var(--line);
+  height: 100%;
+}
+
+.switch-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding-top: 4px;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
 }
 
-.edit-user-form .inline-check input {
-  width: auto;
+.switch-field strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.switch-field small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.switch-control {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+
+.switch-control input {
+  position: absolute;
+  inset: 0;
   margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.edit-user-form .inbound-picker {
-  gap: 6px;
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.edit-user-form .compact-head {
-  margin-bottom: 4px;
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.24);
+  transition: transform 0.15s ease;
 }
 
-.edit-user-form .compact-head h4 {
-  font-size: 0.88rem;
+.switch-control input:checked + .switch-track {
+  background: rgba(59, 130, 246, 0.78);
+  border-color: rgba(59, 130, 246, 0.55);
 }
 
-.edit-user-form .actions {
-  gap: 6px;
+.switch-control input:checked + .switch-track::after {
+  transform: translateX(22px);
 }
 
-.edit-user-form .actions .ghost {
-  padding: 7px 10px;
-  font-size: 0.82rem;
+.switch-control input:focus-visible + .switch-track {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
 }
 
-.edit-user-form .inbound-group {
+.edit-user-side .compact-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.protocols-panel {
+  align-content: start;
+}
+
+.protocol-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.protocol-card {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 10px 10px 11px;
+  border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
 }
 
-.edit-user-form .inbound-group-title {
-  padding: 7px 10px;
-  font-size: 0.72rem;
+.protocol-card.disabled {
+  opacity: 0.58;
 }
 
-.edit-user-form .inbound-checklist {
-  gap: 6px;
-  padding: 9px;
+.protocol-card.open {
+  border-color: rgba(59, 130, 246, 0.34);
+  background: rgba(59, 130, 246, 0.07);
 }
 
-.edit-user-form .inbound-option {
-  border-radius: 10px;
-  padding: 7px 10px;
-}
-
-.edit-user-form .inbound-option.selected {
-  border-color: rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.06);
-}
-
-.edit-user-form .inbound-option strong {
-  font-size: 0.9rem;
-}
-
-.edit-user-form .inbound-option small {
-  margin-top: 2px;
-  font-size: 0.78rem;
-}
-
-.edit-user-form .expiry-picker {
+.protocol-card-body {
+  min-width: 0;
+  display: grid;
   gap: 3px;
 }
 
-.edit-user-form .expiry-picker > label {
+.protocol-card-body strong {
+  font-size: 0.9rem;
+}
+
+.protocol-card-body small,
+.protocol-card-body span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.protocol-card-menu {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.06);
+  flex: 0 0 auto;
+}
+
+.protocol-card-menu:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.protocol-card-menu:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.protocol-popover {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.protocol-checklist {
+  display: grid;
+  gap: 7px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.protocol-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.protocol-option.selected {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.07);
+}
+
+.protocol-option input {
+  margin-top: 2px;
+}
+
+.protocol-option strong,
+.protocol-option small {
+  display: block;
+}
+
+.protocol-option strong {
+  line-height: 1.35;
+  font-size: 0.88rem;
+}
+
+.protocol-option small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.edit-user-main .expiry-picker {
+  gap: 4px;
+}
+
+.edit-user-main .expiry-picker > label {
   font-size: 0.78rem;
 }
 
-.edit-user-form .expiry-display {
+.edit-user-main .expiry-display {
   min-height: 40px;
   border-radius: 10px;
   padding: 7px 34px 7px 10px;
   background: var(--surface-2);
 }
 
-.edit-user-form .expiry-display:hover {
+.edit-user-main .expiry-display:hover {
   border-color: rgba(148, 163, 184, 0.24);
   background: var(--surface);
 }
 
-.edit-user-form .expiry-display:focus-visible {
+.edit-user-main .expiry-display:focus-visible {
   border-color: rgba(59, 130, 246, 0.48);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08);
 }
 
-.edit-user-form .expiry-display-icon {
+.edit-user-main .expiry-display-icon {
   width: 15px;
   height: 15px;
   right: 11px;
 }
 
-.edit-user-form .expiry-clear {
+.edit-user-main .expiry-clear {
   width: 22px;
   height: 22px;
   right: 8px;
   font-size: 0.95rem;
 }
 
-.edit-user-form .expiry-shell.has-value .expiry-display {
+.edit-user-main .expiry-shell.has-value .expiry-display {
   padding-right: 34px;
 }
 
-.edit-user-form .expiry-shell:not(.has-value) .expiry-display {
+.edit-user-main .expiry-shell:not(.has-value) .expiry-display {
   padding-right: 34px;
 }
 
-.edit-user-form .expiry-shell:not(.has-value) .expiry-display-value {
+.edit-user-main .expiry-shell:not(.has-value) .expiry-display-value {
   display: none;
 }
 
-.edit-user-form .alert {
-  grid-column: 1 / -1;
+.edit-user-main .expiry-relative {
+  margin: 0 1px;
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
-.edit-user-form > button.primary {
+.protocols-panel .compact-head h4 {
+  font-size: 0.92rem;
+}
+
+.protocols-panel .compact-head small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.76rem;
+}
+
+.edit-user-footer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 2px;
+}
+
+.edit-user-footer .alert {
+  margin: 0;
+}
+
+.edit-user-footer > button.primary {
   justify-self: end;
   min-width: 180px;
   padding-inline: 18px;
@@ -971,22 +1214,6 @@ small {
   width: min(980px, 100%);
 }
 
-.modal.edit-modal {
-  width: min(760px, 100%);
-}
-
-.modal.edit-modal .card-head {
-  margin-bottom: 10px;
-}
-
-.modal.edit-modal .card-head h3 {
-  font-size: 1.05rem;
-}
-
-.modal.edit-modal .card-head .ghost {
-  padding: 7px 10px;
-}
-
 .modal.wide-modal .table-wrap {
   max-width: 100%;
 }
@@ -1058,10 +1285,22 @@ small {
     grid-template-columns: 1fr;
   }
 
-  .edit-user-form > button.primary {
+  .protocol-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-user-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-user-footer > button.primary {
     justify-self: stretch;
     width: 100%;
     min-width: 0;
+  }
+
+  .compact-panel {
+    padding: 10px;
   }
 }
 

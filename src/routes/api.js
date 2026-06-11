@@ -176,11 +176,20 @@ function selectedInboundIdsFromBody(body, fallback = []) {
   return Array.isArray(fallback) ? fallback.filter((value) => typeof value === "string" && value.trim()) : [];
 }
 
-function normalizeIsoDateOrNull(value, key) {
+function normalizeIsoDateOrNull(value, key, { allowPast = false } = {}) {
   if (value == null || value === "") return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiryDay = new Date(date);
+  expiryDay.setHours(0, 0, 0, 0);
+  if (!allowPast && expiryDay < today) {
+    const error = new Error("Expiry date cannot be in the past.");
     error.status = 400;
     throw error;
   }
@@ -297,7 +306,7 @@ export async function handleApi(req, res, route) {
     const body = await readJson(req);
     const username = requiredString(body, "username");
     const password = requiredString(body, "password");
-    const validity = normalizeIsoDateOrNull(body.validUntil ?? body.expiresAt, "validUntil");
+    const validity = normalizeIsoDateOrNull(body.validUntil ?? body.expiresAt, "validUntil", { allowPast: true });
     if (store.list("admins").some((admin) => admin.username === username)) {
       return sendJson(res, 409, { ok: false, error: "Username already exists" });
     }
@@ -404,8 +413,8 @@ export async function handleApi(req, res, route) {
 
   const scopedInbounds = match(pathname, "/api/admin/panels/:id/inbounds");
   if (scopedInbounds && method === "GET") {
-    const actorScoped = requireAuth(req);
-    const panel = scopedPanels(actorScoped).find((item) => item.id === scopedInbounds.id);
+    requireAuth(req, "superadmin");
+    const panel = store.find("panels", scopedInbounds.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
     if (panel.type !== "marzban") {
       return sendJson(res, 501, { ok: false, error: "Real inbounds are only implemented for Marzban panels" });
@@ -435,12 +444,12 @@ export async function handleApi(req, res, route) {
   if (method === "POST" && pathname === "/api/admin/users") {
     const body = await readJson(req);
     const username = requiredString(body, "username");
-    const panelIdRaw = requiredString(body, "panelId");
-    const panelIdValue = actor.role === "superadmin" ? panelIdRaw : actor.panelId;
+    const panelIdRaw = actor.role === "superadmin" ? requiredString(body, "panelId") : actor.panelId;
+    const panelIdValue = panelIdRaw;
     const panel = store.find("panels", panelIdValue);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
-    const inboundIds = selectedInboundIdsFromBody(body);
-    enforceResellerValidity(actor, body.expiresAt);
+    const expiresAt = Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : null;
+    enforceResellerValidity(actor, expiresAt);
     const requestedLimitBytes = Object.prototype.hasOwnProperty.call(body, "limitBytes")
       ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes")
       : 0;
@@ -449,6 +458,19 @@ export async function handleApi(req, res, route) {
       : 0;
     const owner = store.find("admins", actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id);
     if (!owner) return sendJson(res, 400, { ok: false, error: "Valid ownerAdminId is required" });
+    const adapter = adapterFor(panel.type);
+    const resellerMarzbanInbounds = actor.role === "admin" && panel.type === "marzban";
+    let resolvedInboundIds = selectedInboundIdsFromBody(body);
+    if (resellerMarzbanInbounds) {
+      if (!adapter || typeof adapter.listInbounds !== "function") {
+        return sendJson(res, 501, { ok: false, error: "Real inbound defaults are not available for this panel type yet" });
+      }
+      const rows = await adapter.listInbounds(panel);
+      resolvedInboundIds = rows.map((row) => row.id).filter((value) => typeof value === "string" && value.trim());
+    }
+    if (resellerMarzbanInbounds && resolvedInboundIds.length === 0) {
+      return sendJson(res, 400, { ok: false, error: "No Marzban inbounds available for this panel" });
+    }
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
     if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
       if (ownerRemainingBytes < requestedLimitBytes) {
@@ -458,7 +480,7 @@ export async function handleApi(req, res, route) {
         trafficRemainingBytes: ownerRemainingBytes - requestedLimitBytes
       });
     }
-    const primaryInboundId = preferredInboundId(inboundIds, body.inboundId);
+    const primaryInboundId = preferredInboundId(resolvedInboundIds, body.inboundId);
     const userRecord = {
       ownerAdminId: owner.id,
       panelId: panel.id,
@@ -466,22 +488,24 @@ export async function handleApi(req, res, route) {
       uuid: body.uuid || null,
       subscriptionId: body.subscriptionId || null,
       inboundId: primaryInboundId,
-      inboundMode: normalizeInboundMode(body.inboundMode),
-      flow: body.flow || "",
+      inboundMode: resellerMarzbanInbounds ? "all" : normalizeInboundMode(body.inboundMode),
+      flow: actor.role === "superadmin" ? body.flow || "" : "",
+      note: body.note || "",
       active: body.active !== false,
       limitBytes: requestedLimitBytes,
       usedBytes: requestedUsedBytes,
       reservedBytes: requestedLimitBytes,
-      expiresAt: body.expiresAt || null
+      expiresAt
     };
-    if (inboundIds.length > 0) {
-      userRecord.inboundIds = inboundIds;
+    if (resellerMarzbanInbounds) {
+      userRecord.inboundIds = resolvedInboundIds;
+    } else if (resolvedInboundIds.length > 0) {
+      userRecord.inboundIds = resolvedInboundIds;
     }
     const user = store.insert("users", {
       ...userRecord
     });
     if (panel.type === "marzban") {
-      const adapter = adapterFor(panel.type);
       if (!adapter || typeof adapter.createUser !== "function") {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
           store.update("admins", owner.id, {
@@ -494,8 +518,8 @@ export async function handleApi(req, res, route) {
       try {
         await adapter.createUser(panel, {
           ...user,
-          inboundIds,
-          expiresAt: body.expiresAt || null
+          inboundIds: userRecord.inboundIds || [],
+          expiresAt
         });
       } catch (error) {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
@@ -519,34 +543,58 @@ export async function handleApi(req, res, route) {
     const user = scopedUsers(actor).find((item) => item.id === userId.id);
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const body = await readJson(req);
-    const blockedField = ["username", "panelId", "ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"].find((field) =>
-      Object.prototype.hasOwnProperty.call(body, field)
-    );
+    const blockedField = (actor.role === "admin"
+      ? ["username", "panelId", "ownerAdminId", "usedBytes", "reservedBytes", "inboundId", "inboundIds", "inboundMode", "flow", "uuid", "subscriptionId"]
+      : ["username", "panelId", "ownerAdminId", "usedBytes", "reservedBytes"]
+    ).find((field) => Object.prototype.hasOwnProperty.call(body, field));
     if (blockedField) {
       return sendJson(res, 400, { ok: false, error: `Cannot update ${blockedField}` });
     }
     const panel = store.find("panels", user.panelId);
     const inboundIds = selectedInboundIdsFromBody(body, user.inboundIds || [user.inboundId]);
     const primaryInboundId = preferredInboundId(inboundIds, body.inboundId ?? user.inboundId);
-    const updatePatch = {
-      ...body,
-      inboundId: primaryInboundId,
-      inboundMode: normalizeInboundMode(body.inboundMode ?? user.inboundMode),
-      expiresAt: Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : user.expiresAt || null,
-      flow: Object.prototype.hasOwnProperty.call(body, "flow") ? body.flow || "" : user.flow || "",
-      active: Object.prototype.hasOwnProperty.call(body, "active") ? body.active !== false : user.active !== false
-    };
-    if (inboundIds.length > 0) {
-      updatePatch.inboundIds = inboundIds;
-    } else {
-      delete updatePatch.inboundIds;
+    const oldReservedBytes = Math.max(0, finiteQuotaBytes(user.reservedBytes) ?? finiteQuotaBytes(user.limitBytes) ?? 0);
+    const oldLimitBytes = Math.max(0, finiteQuotaBytes(user.limitBytes) ?? 0);
+    const usedBytes = Math.max(0, finiteQuotaBytes(user.usedBytes) ?? 0);
+    const limitBytesChanged = Object.prototype.hasOwnProperty.call(body, "limitBytes");
+    const requestedLimitBytes = limitBytesChanged ? parseNonNegativeFiniteBytes(body.limitBytes, "limitBytes") : oldLimitBytes;
+    if (limitBytesChanged && requestedLimitBytes < usedBytes) {
+      return sendJson(res, 400, { ok: false, error: "Traffic limit cannot be lower than used traffic." });
     }
-    delete updatePatch.username;
-    delete updatePatch.panelId;
-    delete updatePatch.ownerAdminId;
-    delete updatePatch.limitBytes;
-    delete updatePatch.usedBytes;
-    delete updatePatch.reservedBytes;
+    const limitDelta = limitBytesChanged ? requestedLimitBytes - oldReservedBytes : 0;
+    const owner = store.find("admins", user.ownerAdminId);
+    const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
+    if (limitDelta > 0 && ownerRemainingBytes !== null && ownerRemainingBytes < limitDelta) {
+      return sendJson(res, 409, { ok: false, error: "Insufficient traffic quota" });
+    }
+    const updatePatch = actor.role === "admin"
+      ? {
+          ...(limitBytesChanged ? { limitBytes: requestedLimitBytes, reservedBytes: requestedLimitBytes } : {}),
+          expiresAt: Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : user.expiresAt || null,
+          note: Object.prototype.hasOwnProperty.call(body, "note") ? body.note || "" : user.note || "",
+          active: Object.prototype.hasOwnProperty.call(body, "active") ? body.active !== false : user.active !== false
+        }
+      : {
+          ...body,
+          inboundId: primaryInboundId,
+          inboundMode: normalizeInboundMode(body.inboundMode ?? user.inboundMode),
+          ...(limitBytesChanged ? { limitBytes: requestedLimitBytes, reservedBytes: requestedLimitBytes } : {}),
+          expiresAt: Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : user.expiresAt || null,
+          flow: Object.prototype.hasOwnProperty.call(body, "flow") ? body.flow || "" : user.flow || "",
+          note: Object.prototype.hasOwnProperty.call(body, "note") ? body.note || "" : user.note || "",
+          active: Object.prototype.hasOwnProperty.call(body, "active") ? body.active !== false : user.active !== false
+        };
+    if (actor.role !== "admin") {
+      if (inboundIds.length > 0) {
+        updatePatch.inboundIds = inboundIds;
+      } else {
+        delete updatePatch.inboundIds;
+      }
+      delete updatePatch.username;
+      delete updatePatch.panelId;
+      delete updatePatch.ownerAdminId;
+      delete updatePatch.usedBytes;
+    }
     if (panel?.type === "marzban") {
       const adapter = adapterFor(panel.type);
       if (!adapter || typeof adapter.updateUser !== "function") {
@@ -560,6 +608,12 @@ export async function handleApi(req, res, route) {
           error: error.message || "Marzban user update failed"
         });
       }
+    }
+    if (limitBytesChanged && limitDelta !== 0 && ownerRemainingBytes !== null) {
+      const nextRemaining = ownerRemainingBytes + (limitDelta < 0 ? Math.abs(limitDelta) : -limitDelta);
+      store.update("admins", owner.id, {
+        trafficRemainingBytes: nextRemaining
+      });
     }
     const updated = store.update("users", user.id, updatePatch);
     store.audit(actor, "user.update", user.id);

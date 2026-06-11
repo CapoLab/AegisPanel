@@ -27,9 +27,12 @@ const state = {
   editUserInboundsError: "",
   editUserInboundId: "",
   editUserInboundIds: [],
+  editUserLimitGb: "0",
   editUserExpiryDate: "",
+  editUserNote: "",
   editUserFlow: "",
   editUserActive: true,
+  editUserProtocolOpen: "",
   editUserError: "",
   error: "",
   notice: ""
@@ -106,6 +109,49 @@ function gbToBytes(value) {
   return Math.max(0, Number(value || 0)) * 1024 ** 3;
 }
 
+function bytesToGbInputValue(value) {
+  const bytesValue = Number(value);
+  if (!Number.isFinite(bytesValue) || bytesValue < 0) return "0";
+  return String(Math.round((bytesValue / 1024 ** 3) * 1000) / 1000);
+}
+
+function todayDateInputValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = pad2(now.getMonth() + 1);
+  const day = pad2(now.getDate());
+  return `${year}-${month}-${day}`;
+}
+
+function dateOnlyValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  return `${year}-${month}-${day}`;
+}
+
+function daysBetweenDates(value) {
+  if (!value) return null;
+  const selected = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(selected.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  selected.setHours(0, 0, 0, 0);
+  return Math.round((selected.getTime() - today.getTime()) / 86400000);
+}
+
+function relativeExpiryText(value) {
+  const diff = daysBetweenDates(value);
+  if (diff === null) return "";
+  if (diff === 0) return "Expires today";
+  if (diff > 0) return `Expires in ${diff} day${diff === 1 ? "" : "s"}`;
+  const abs = Math.abs(diff);
+  return `Expired ${abs} day${abs === 1 ? "" : "s"} ago`;
+}
+
 function dateShort(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -160,9 +206,12 @@ function logout() {
   state.editUserInboundsError = "";
   state.editUserInboundId = "";
   state.editUserInboundIds = [];
+  state.editUserLimitGb = "0";
   state.editUserExpiryDate = "";
+  state.editUserNote = "";
   state.editUserFlow = "";
   state.editUserActive = true;
+  state.editUserProtocolOpen = "";
   state.editUserError = "";
   closeModal();
   renderLogin();
@@ -620,7 +669,7 @@ function showAdminForm() {
 function showUserForm() {
   state.error = "";
   state.createUserError = "";
-  state.createUserPanelId = state.data?.panels?.[0]?.id || "";
+  state.createUserPanelId = isSuperadmin() ? state.data?.panels?.[0]?.id || "" : state.admin?.panelId || "";
   state.createUserInbounds = [];
   state.createUserInboundsLoading = false;
   state.createUserInboundsError = "";
@@ -628,20 +677,58 @@ function showUserForm() {
   state.createUserInboundIds = [];
   state.createUserExpiryDate = "";
   modal("Create VPN account", createUserModalBody());
-  if (state.createUserPanelId) {
+  if (isSuperadmin() && state.createUserPanelId) {
     void loadUserInbounds(state.createUserPanelId, { silent: true });
   }
 }
 
 function createUserModalBody() {
+  return isSuperadmin() ? createUserAdvancedModalBody() : createUserSimpleModalBody();
+}
+
+function createUserSimpleModalBody() {
+  return `
+    <form class="form create-user-form" onsubmit="window.Aegis.createUser(event)">
+      <label>Username<input name="username" required placeholder="client-name" /></label>
+      <label>Data Limit<div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div></label>
+      <div id="user-expiry-field">${createUserExpiryField()}</div>
+      <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
+      <label class="switch-field">
+        <span>
+          <strong>Status</strong>
+          <small>Active account</small>
+        </span>
+        <span class="switch-control">
+          <input name="active" type="checkbox" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+        </span>
+      </label>
+      <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
+      <button class="primary" type="submit">Create VPN account</button>
+    </form>
+  `;
+}
+
+function createUserAdvancedModalBody() {
   return `
     <form class="form create-user-form" onsubmit="window.Aegis.createUser(event)">
       <label>Username<input name="username" required placeholder="client-name" /></label>
       <label>Panel<select name="panelId" required onchange="window.Aegis.loadUserInbounds(this.value)">${(state.data?.panels || []).map((p) => `<option value="${p.id}"${p.id === state.createUserPanelId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       <div id="user-inbound-field">${createUserInboundField()}</div>
       <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
-      <label>Traffic limit (GB)<input name="limitGb" type="number" min="0" step="1" value="25" /></label>
+      <label>Data Limit<div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div></label>
       <div id="user-expiry-field">${createUserExpiryField()}</div>
+      <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
+      <label class="switch-field">
+        <span>
+          <strong>Status</strong>
+          <small>Active account</small>
+        </span>
+        <span class="switch-control">
+          <input name="active" type="checkbox" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+        </span>
+      </label>
       <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
       <button class="primary" type="submit">Create VPN account</button>
     </form>
@@ -825,6 +912,124 @@ function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, err
   `;
 }
 
+function editUserProtocolDefs() {
+  return [
+    { key: "vmess", label: "VMess", description: "VMess configs" },
+    { key: "vless", label: "VLess", description: "VLess configs" },
+    { key: "trojan", label: "Trojan", description: "Trojan configs" },
+    { key: "shadowsocks", label: "Shadowsocks", description: "Shadowsocks configs" }
+  ];
+}
+
+function protocolKey(value) {
+  return String(value || "").toLowerCase();
+}
+
+function editUserProtocolInbounds(protocol) {
+  const key = protocolKey(protocol);
+  return state.editUserInbounds.filter((inbound) => protocolKey(inbound.protocol) === key);
+}
+
+function editUserProtocolSelectedCount(protocolInbounds) {
+  return protocolInbounds.filter((inbound) => state.editUserInboundIds.includes(inbound.id)).length;
+}
+
+function editUserProtocolSelectionSummary(protocolInbounds) {
+  const total = protocolInbounds.length;
+  const selected = editUserProtocolSelectedCount(protocolInbounds);
+  if (!total) return "No configs available";
+  if (!selected) return `${total} config${total === 1 ? "" : "s"} available`;
+  return `${selected}/${total} selected`;
+}
+
+function renderEditUserProtocolCard({ key, label, description }, protocolInbounds) {
+  const hasInbounds = protocolInbounds.length > 0;
+  const open = state.editUserProtocolOpen === key;
+  return `
+    <div class="protocol-card${hasInbounds ? "" : " disabled"}${open ? " open" : ""}">
+      <div class="protocol-card-body">
+        <strong>${esc(label)}</strong>
+        <small>${esc(hasInbounds ? editUserProtocolSelectionSummary(protocolInbounds) : "No configs available")}</small>
+        <span>${esc(description)}</span>
+      </div>
+      <button
+        type="button"
+        class="protocol-card-menu"
+        ${hasInbounds ? "" : "disabled"}
+        aria-label="${esc(open ? `Close ${label} configs` : `Open ${label} configs`)}"
+        aria-expanded="${open ? "true" : "false"}"
+        onclick="window.Aegis.toggleEditUserProtocolPanel('${esc(key)}')"
+      >⋮</button>
+    </div>
+  `;
+}
+
+function editUserProtocolsField() {
+  if (state.editUserInboundsLoading) {
+    return `
+      <div class="compact-panel protocols-panel">
+        <p class="muted">Loading Marzban configs...</p>
+      </div>
+    `;
+  }
+  if (state.editUserInboundsError) {
+    return `
+      <div class="compact-panel protocols-panel">
+        <p class="alert danger">${esc(state.editUserInboundsError)}</p>
+      </div>
+    `;
+  }
+  const defs = editUserProtocolDefs();
+  const openKey = state.editUserProtocolOpen;
+  const openDef = defs.find((item) => item.key === openKey);
+  const openInbounds = openDef ? editUserProtocolInbounds(openKey) : [];
+  return `
+    <div class="compact-panel protocols-panel">
+      <div class="card-head compact-head">
+        <div>
+          <h4>Protocols</h4>
+          <small class="muted">Open a protocol with the 3-dots menu to edit its configs.</small>
+        </div>
+      </div>
+      <div class="protocol-grid">
+        ${defs.map((def) => renderEditUserProtocolCard(def, editUserProtocolInbounds(def.key))).join("")}
+      </div>
+      ${openDef ? `
+        <div class="protocol-popover">
+          <div class="card-head compact-head">
+            <div>
+              <h4>${esc(openDef.label)} configs</h4>
+              <small class="muted">${esc(editUserProtocolSelectionSummary(openInbounds))}</small>
+            </div>
+            <div class="actions">
+              <button type="button" class="ghost" onclick="window.Aegis.selectEditUserProtocolInbounds('${esc(openDef.key)}')">Select all</button>
+              <button type="button" class="ghost" onclick="window.Aegis.clearEditUserProtocolInbounds('${esc(openDef.key)}')">Clear</button>
+            </div>
+          </div>
+          ${openInbounds.length ? `
+            <div class="protocol-checklist">
+              ${openInbounds.map((inbound) => `
+                <label class="protocol-option ${state.editUserInboundIds.includes(inbound.id) ? "selected" : ""}">
+                  <input
+                    type="checkbox"
+                    value="${esc(inbound.id)}"
+                    ${state.editUserInboundIds.includes(inbound.id) ? "checked" : ""}
+                    onchange="window.Aegis.toggleEditUserProtocolSelection('${esc(openDef.key)}', this.value, this.checked)"
+                  />
+                  <span>
+                    <strong>${esc(formatInboundOption(inbound))}</strong>
+                    <small>${esc(formatInboundDetails(inbound))}</small>
+                  </span>
+                </label>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">No configs available for this protocol.</p>`}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
 function createUserExpiryField() {
   return renderExpiryField({
     value: state.createUserExpiryDate,
@@ -841,12 +1046,15 @@ function editUserExpiryField() {
     openAction: "openEditUserExpiryPicker",
     changeAction: "setEditUserExpiryDate",
     clearAction: "clearEditUserExpiry",
-    valueName: "editExpiresAtDate"
+    valueName: "editExpiresAtDate",
+    showRelative: true
   });
 }
 
-function renderExpiryField({ value, openAction, changeAction, clearAction, valueName }) {
+function renderExpiryField({ value, openAction, changeAction, clearAction, valueName, showRelative = false }) {
   const currentValue = value || "";
+  const relativeText = showRelative ? relativeExpiryText(currentValue) : "";
+  const minValue = todayDateInputValue();
   return `
     <div class="expiry-picker">
       <label>Expiry Date</label>
@@ -855,9 +1063,10 @@ function renderExpiryField({ value, openAction, changeAction, clearAction, value
           <span class="expiry-display-value">${esc(currentValue)}</span>
           <span class="expiry-display-icon" aria-hidden="true">${calendarIcon()}</span>
         </button>
-        <input class="expiry-native" name="${esc(valueName)}" type="date" value="${esc(currentValue)}" onchange="window.Aegis.${changeAction}(this.value)" />
+        <input class="expiry-native" name="${esc(valueName)}" type="date" value="${esc(currentValue)}" min="${esc(minValue)}" onchange="window.Aegis.${changeAction}(this.value)" />
         ${currentValue ? `<button type="button" class="expiry-clear" onclick="window.Aegis.${clearAction}(event)" aria-label="Clear expiry date">×</button>` : ""}
       </div>
+      ${relativeText ? `<small class="expiry-relative">${esc(relativeText)}</small>` : ""}
     </div>
   `;
 }
@@ -1017,13 +1226,17 @@ async function createAdmin(event) {
 async function createUser(event) {
   event.preventDefault();
   const form = new FormData(event.target);
-  const panelId = form.get("panelId");
+  const isSuperadminUser = isSuperadmin();
+  const panelId = isSuperadminUser ? form.get("panelId") : state.admin?.panelId || state.createUserPanelId || "";
   const panel = state.data?.panels?.find((item) => item.id === panelId);
   state.error = "";
   state.createUserError = "";
   refreshCreateUserError();
   try {
-    if (panel?.type === "marzban") {
+    if (!panel) {
+      throw new Error("Valid panelId is required");
+    }
+    if (isSuperadminUser && panel?.type === "marzban") {
       if (state.createUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
@@ -1043,10 +1256,12 @@ async function createUser(event) {
           expiresAt,
           inboundId: preferredMarzbanInboundId(inboundIds),
           inboundIds,
-          inboundMode: inboundModeFromSelection(inboundIds, state.createUserInbounds.map((inbound) => inbound.id))
+          inboundMode: inboundModeFromSelection(inboundIds, state.createUserInbounds.map((inbound) => inbound.id)),
+          note: form.get("note") || "",
+          active: form.has("active")
         }
       });
-    } else {
+    } else if (isSuperadminUser) {
       await api("/api/admin/users", {
         method: "POST",
         body: {
@@ -1055,7 +1270,20 @@ async function createUser(event) {
           flow: form.get("flow") || "",
           limitBytes: gbToBytes(form.get("limitGb")),
           expiresAt: resolveCreateUserExpiry(form),
+          note: form.get("note") || "",
+          active: form.has("active"),
           inboundId: form.get("inboundId") || "default"
+        }
+      });
+    } else {
+      await api("/api/admin/users", {
+        method: "POST",
+        body: {
+          username: form.get("username"),
+          limitBytes: gbToBytes(form.get("limitGb")),
+          expiresAt: resolveCreateUserExpiry(form),
+          note: form.get("note") || "",
+          active: form.has("active")
         }
       });
     }
@@ -1078,20 +1306,24 @@ function showEditUserForm(id) {
   state.editUserId = user.id;
   state.editUserUsername = user.username || "";
   state.editUserPanelId = user.panelId || "";
-  state.editUserInbounds = [];
   const panel = state.data?.panels?.find((item) => item.id === user.panelId);
-  state.editUserInboundsLoading = panel?.type === "marzban";
+  const advanced = isSuperadmin();
+  state.editUserInbounds = [];
+  state.editUserInboundsLoading = advanced && panel?.type === "marzban";
   state.editUserInboundsError = "";
   state.editUserInboundIds = Array.isArray(user.inboundIds) && user.inboundIds.length
     ? user.inboundIds.filter((value) => typeof value === "string" && value.trim())
     : [user.inboundId].filter(Boolean);
   state.editUserInboundId = preferredMarzbanInboundId(state.editUserInboundIds, user.inboundId);
+  state.editUserLimitGb = bytesToGbInputValue(user.limitBytes);
   state.editUserExpiryDate = normalizeDateInputValue(user.expiresAt);
-  state.editUserFlow = user.flow || "";
+  state.editUserNote = user.note || "";
+  state.editUserFlow = advanced ? user.flow || "" : "";
   state.editUserActive = user.active !== false;
+  state.editUserProtocolOpen = "";
   state.editUserError = "";
   modal("Edit VPN account", editUserModalBody());
-  if (panel?.type === "marzban") {
+  if (advanced && panel?.type === "marzban") {
     void loadEditUserInbounds(user.id, user.panelId, { silent: true });
   } else {
     state.editUserInboundsLoading = false;
@@ -1099,18 +1331,76 @@ function showEditUserForm(id) {
 }
 
 function editUserModalBody() {
+  return isSuperadmin() ? editUserAdvancedModalBody() : editUserSimpleModalBody();
+}
+
+function editUserSimpleModalBody() {
+  return `
+    <form class="form edit-user-form edit-user-simple" onsubmit="window.Aegis.saveEditUser(event)">
+      <div class="edit-user-main">
+        <label>Username<input name="username" readonly value="${esc(state.editUserUsername)}" /></label>
+        <label class="unit-field">
+          <span>Data Limit</span>
+          <div class="unit-input">
+            <input name="limitGb" type="number" min="0" step="any" value="${esc(state.editUserLimitGb)}" />
+            <span>GB</span>
+          </div>
+        </label>
+        <div id="edit-user-expiry-field">${editUserExpiryField()}</div>
+        <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations">${esc(state.editUserNote)}</textarea></label>
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>${state.editUserActive ? "Active account" : "Paused account"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+      <div class="edit-user-footer">
+        <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
+        <button class="primary" type="submit">Save VPN account</button>
+      </div>
+    </form>
+  `;
+}
+
+function editUserAdvancedModalBody() {
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
   const isMarzban = panel?.type === "marzban";
   return `
     <form class="form edit-user-form" onsubmit="window.Aegis.saveEditUser(event)">
-      <label>Username<input name="username" readonly value="${esc(state.editUserUsername)}" /></label>
-      <label>Panel<input readonly value="${esc(panelName(state.editUserPanelId))}" /></label>
-      <div id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label>`}</div>
-      <label>Flow<input name="flow" value="${esc(state.editUserFlow)}" placeholder="xtls-rprx-vision, optional" /></label>
-      <label class="inline-check">Active<input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} /></label>
-      <div id="edit-user-expiry-field">${editUserExpiryField()}</div>
-      <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
-      <button class="primary" type="submit">Save VPN account</button>
+      <div class="edit-user-main">
+        <label>Username<input name="username" readonly value="${esc(state.editUserUsername)}" /></label>
+        <label>Panel<input readonly value="${esc(panelName(state.editUserPanelId))}" /></label>
+        <label class="unit-field">
+          <span>Data Limit</span>
+          <div class="unit-input">
+            <input name="limitGb" type="number" min="0" step="any" value="${esc(state.editUserLimitGb)}" />
+            <span>GB</span>
+          </div>
+        </label>
+        <div id="edit-user-expiry-field">${editUserExpiryField()}</div>
+        <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations">${esc(state.editUserNote)}</textarea></label>
+        <label>Flow<input name="flow" value="${esc(state.editUserFlow)}" placeholder="xtls-rprx-vision, optional" /></label>
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>${state.editUserActive ? "Active account" : "Paused account"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox"${state.editUserActive ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+      <div class="edit-user-side" id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<div class="compact-panel"><div class="card-head compact-head"><h4>Protocols</h4></div><label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label></div>`}</div>
+      <div class="edit-user-footer">
+        <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
+        <button class="primary" type="submit">Save VPN account</button>
+      </div>
     </form>
   `;
 }
@@ -1118,19 +1408,9 @@ function editUserModalBody() {
 function editUserInboundField() {
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
   if (panel?.type !== "marzban") {
-    return `<label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label>`;
+    return `<div class="compact-panel"><div class="card-head compact-head"><h4>Protocols</h4></div><label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label></div>`;
   }
-  return renderMarzbanInboundPicker({
-    title: "Inbounds",
-    inbounds: state.editUserInbounds,
-    selectedIds: state.editUserInboundIds,
-    loading: state.editUserInboundsLoading,
-    error: state.editUserInboundsError,
-    emptyMessage: "This Marzban panel has no inbounds yet. Load inbounds before saving the VPN account.",
-    toggleAction: "toggleEditMarzbanInboundSelection",
-    selectAllAction: "selectAllEditMarzbanInbounds",
-    clearAction: "clearEditMarzbanInbounds"
-  });
+  return editUserProtocolsField();
 }
 
 function refreshEditUserInboundField() {
@@ -1140,6 +1420,43 @@ function refreshEditUserInboundField() {
     return;
   }
   field.innerHTML = editUserInboundField();
+}
+
+function refreshEditUserProtocolsField() {
+  refreshEditUserInboundField();
+}
+
+function toggleEditUserProtocolPanel(protocol) {
+  state.editUserProtocolOpen = state.editUserProtocolOpen === protocol ? "" : protocol;
+  refreshEditUserProtocolsField();
+}
+
+function toggleEditUserProtocolSelection(protocol, id, checked) {
+  const selected = new Set(state.editUserInboundIds);
+  if (checked) selected.add(id);
+  else selected.delete(id);
+  state.editUserInboundIds = [...selected];
+  state.editUserError = "";
+  refreshEditUserProtocolsField();
+  refreshEditUserError();
+}
+
+function selectEditUserProtocolInbounds(protocol) {
+  const ids = editUserProtocolInbounds(protocol).map((inbound) => inbound.id);
+  const selected = new Set(state.editUserInboundIds);
+  ids.forEach((id) => selected.add(id));
+  state.editUserInboundIds = [...selected];
+  state.editUserError = "";
+  refreshEditUserProtocolsField();
+  refreshEditUserError();
+}
+
+function clearEditUserProtocolInbounds(protocol) {
+  const ids = new Set(editUserProtocolInbounds(protocol).map((inbound) => inbound.id));
+  state.editUserInboundIds = state.editUserInboundIds.filter((id) => !ids.has(id));
+  state.editUserError = "";
+  refreshEditUserProtocolsField();
+  refreshEditUserError();
 }
 
 function refreshEditUserError() {
@@ -1263,12 +1580,13 @@ async function saveEditUser(event) {
   const form = new FormData(event.target);
   const user = state.users?.find((item) => item.id === state.editUserId);
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
+  const advanced = isSuperadmin();
   state.error = "";
   state.editUserError = "";
   refreshEditUserError();
   try {
     if (!user) throw new Error("User not found");
-    if (panel?.type === "marzban") {
+    if (advanced && panel?.type === "marzban") {
       if (state.editUserInboundsLoading) {
         throw new Error("Please wait for Marzban inbounds to load.");
       }
@@ -1284,7 +1602,21 @@ async function saveEditUser(event) {
           inboundIds,
           inboundId: preferredMarzbanInboundId(inboundIds),
           inboundMode: inboundModeFromSelection(inboundIds, state.editUserInbounds.map((inbound) => inbound.id)),
+          limitBytes: gbToBytes(form.get("limitGb")),
           expiresAt,
+          note: form.get("note") || "",
+          flow: form.get("flow") || "",
+          active: form.has("active")
+        }
+      });
+    } else if (advanced) {
+      await api(`/api/admin/users/${user.id}`, {
+        method: "PUT",
+        body: {
+          inboundId: form.get("inboundId") || user.inboundId || "default",
+          limitBytes: gbToBytes(form.get("limitGb")),
+          expiresAt: resolveEditUserExpiry(form),
+          note: form.get("note") || "",
           flow: form.get("flow") || "",
           active: form.has("active")
         }
@@ -1293,9 +1625,9 @@ async function saveEditUser(event) {
       await api(`/api/admin/users/${user.id}`, {
         method: "PUT",
         body: {
-          inboundId: form.get("inboundId") || user.inboundId || "default",
+          limitBytes: gbToBytes(form.get("limitGb")),
           expiresAt: resolveEditUserExpiry(form),
-          flow: form.get("flow") || "",
+          note: form.get("note") || "",
           active: form.has("active")
         }
       });
@@ -1323,6 +1655,10 @@ function resolveCreateUserExpiry(form) {
 
 function resolveLocalDateEndOfDay(value, errorMessage = "Please select a valid date.") {
   if (!value) return null;
+  const today = todayDateInputValue();
+  if (String(value) < today) {
+    throw new Error(errorMessage);
+  }
   const date = new Date(`${value}T23:59:59`);
   if (Number.isNaN(date.getTime())) {
     throw new Error(errorMessage);
@@ -1469,6 +1805,10 @@ window.Aegis = {
   setCreateUserExpiryDate,
   clearCreateUserExpiry,
   openCreateUserExpiryPicker,
+  toggleEditUserProtocolPanel,
+  toggleEditUserProtocolSelection,
+  selectEditUserProtocolInbounds,
+  clearEditUserProtocolInbounds,
   toggleEditMarzbanInboundSelection,
   selectAllEditMarzbanInbounds,
   clearEditMarzbanInbounds,

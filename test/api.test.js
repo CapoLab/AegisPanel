@@ -237,6 +237,504 @@ test("missing required panel fields return 400", async () => {
   );
 });
 
+test("past expiry is rejected on create before remote calls", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "expired-create",
+          panelId: panel.id,
+          limitBytes: 100,
+          expiresAt: "2000-01-01T23:59:59.000Z",
+          inboundIds: ["vless:WS TLS:10002"]
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Expiry date cannot be in the past\./i);
+    }
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("editing traffic limit consumes and returns reseller quota safely", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "edit-quota-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "tx-ui",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "edit-quota-user",
+          panelId: panel.id,
+          ownerAdminId: owner.id,
+          limitBytes: 200,
+          usedBytes: 50
+        }
+      });
+
+      const afterCreateAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfterCreate = afterCreateAdmins.find((admin) => admin.username === "edit-quota-owner");
+      assert.equal(ownerAfterCreate.trafficRemainingBytes, 800);
+
+      const increased = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/admin/users/${user.id}`,
+        session: login.session,
+        body: {
+          limitBytes: 500
+        }
+      });
+      assert.equal(increased.limitBytes, 500);
+      assert.equal(increased.reservedBytes, 500);
+
+      const afterIncreaseAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfterIncrease = afterIncreaseAdmins.find((admin) => admin.username === "edit-quota-owner");
+      assert.equal(ownerAfterIncrease.trafficRemainingBytes, 500);
+
+      const decreased = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/admin/users/${user.id}`,
+        session: login.session,
+        body: {
+          limitBytes: 150
+        }
+      });
+      assert.equal(decreased.limitBytes, 150);
+      assert.equal(decreased.reservedBytes, 150);
+
+      const afterDecreaseAdmins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const ownerAfterDecrease = afterDecreaseAdmins.find((admin) => admin.username === "edit-quota-owner");
+      assert.equal(ownerAfterDecrease.trafficRemainingBytes, 850);
+    }
+  );
+});
+
+test("editing traffic limit above reseller remaining quota is rejected before Marzban update", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "edit-remote-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 100
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "admin-pass" }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-edit", username: "edit-remote", status: "active" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "edit-remote",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 80,
+              usedBytes: 20,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+          const res = await callApiWithOutcome(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session,
+            body: {
+              limitBytes: 200
+            }
+          });
+          assert.equal(res.statusCode, 409);
+          assert.match(res.json.error, /Insufficient traffic quota/i);
+        }
+      );
+    }
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("editing traffic limit below usedBytes is rejected", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Panel One",
+          type: "tx-ui",
+          url: "https://panel.example.com"
+        }
+      });
+      const user = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "edit-used-user",
+          panelId: panel.id,
+          limitBytes: 200,
+          usedBytes: 150
+        }
+      });
+
+      const res = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/admin/users/${user.id}`,
+        session: login.session,
+        body: {
+          limitBytes: 100
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Traffic limit cannot be lower than used traffic/i);
+    }
+  );
+});
+
+test("past expiry is rejected on edit before Marzban remote update", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "edit-past-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "admin-pass" }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-past", username: "edit-past", status: "active" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "edit-past",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 200,
+              usedBytes: 50,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const updateRes = await callApiWithOutcome(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session,
+            body: {
+              expiresAt: "2000-01-01T23:59:59.000Z"
+            }
+          });
+          assert.equal(updateRes.statusCode, 400);
+          assert.match(updateRes.json.error, /Expiry date cannot be in the past\./i);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 2);
+});
+
+test("marzban remote update failure leaves local limitBytes, reservedBytes, and owner quota unchanged", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "rollback-edit-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "admin-pass" }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-edit-rollback", username: "edit-rollback", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "boom" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "edit-rollback",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 200,
+              usedBytes: 50,
+              inboundIds: ["vless:WS TLS:10002"]
+            }
+          });
+
+          const updateRes = await callApiWithOutcome(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${created.id}`,
+            session: login.session,
+            body: {
+              limitBytes: 500
+            }
+          });
+          assert.equal(updateRes.statusCode, 500);
+          assert.match(updateRes.json.error, /Marzban update user failed with HTTP 500/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: login.session
+          });
+          const stored = users.find((user) => user.username === "edit-rollback");
+          assert.equal(stored.limitBytes, 200);
+          assert.equal(stored.reservedBytes, 200);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const rollbackOwner = admins.find((admin) => admin.username === "rollback-edit-owner");
+          assert.equal(rollbackOwner.trafficRemainingBytes, 800);
+        }
+      );
+    }
+  );
+
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user/edit-rollback");
+});
+
 test("existing valid admin user flow still passes", async () => {
   await withTempEnv(
     {
@@ -530,6 +1028,23 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
           },
           {
             ok: true,
+            status: 200,
+            json: async () => ({
+              vless: [
+                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
+              ],
+              vmess: [
+                { tag: "VMess TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
+              ]
+            })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
             status: 201,
             json: async () => ({ id: "remote-user" })
           }
@@ -548,18 +1063,18 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
               session: resellerLogin.session,
               body: {
                 username: "client-ok",
-                panelId: marzbanPanel.id,
                 limitBytes: 100,
                 expiresAt: "2030-01-02T23:59:59.000Z",
-                inboundIds: ["vless:WS TLS:10002"],
-                inboundId: "vless:WS TLS:10002"
+                note: "within valid window"
               }
             });
             assert.equal(allowed.username, "client-ok");
+            assert.equal(allowed.inboundId, "vless:WS TLS:10002");
+            assert.deepEqual(allowed.inboundIds, ["vless:WS TLS:10002", "vmess:VMess TLS:10001"]);
           });
         }
       );
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 4);
 
       const superadmin = await callApi(handleApi, {
         method: "POST",
@@ -708,7 +1223,7 @@ test("put cannot change quota accounting fields", async () => {
         }
       });
 
-      for (const field of ["username", "panelId", "ownerAdminId", "limitBytes", "usedBytes", "reservedBytes"]) {
+      for (const field of ["username", "panelId", "ownerAdminId", "usedBytes", "reservedBytes"]) {
         const res = await callApiWithOutcome(handleApi, {
           method: "PUT",
           pathname: `/api/admin/users/${user.id}`,
@@ -1066,16 +1581,6 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
         pathname: "/api/auth/login",
         body: { username: "env-admin", password: "env-pass" }
       });
-      const owner = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/superadmin/admins",
-        session: login.session,
-        body: {
-          username: "marz-owner",
-          password: "admin-pass",
-          trafficLimitBytes: 1000
-        }
-      });
       const panel = await callApi(handleApi, {
         method: "POST",
         pathname: "/api/superadmin/panels",
@@ -1088,9 +1593,42 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
           secret: "panel-secret"
         }
       });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "marz-owner",
+          password: "admin-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "admin-pass" }
+      });
 
       await withMockFetch(
         [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              vless: [
+                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
+              ],
+              vmess: [
+                { tag: "VMess TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
+              ]
+            })
+          },
           {
             ok: true,
             status: 200,
@@ -1107,24 +1645,21 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
           const created = await callApi(handleApi, {
             method: "POST",
             pathname: "/api/admin/users",
-            session: login.session,
+            session: resellerLogin.session,
             body: {
               username: "marz-user",
-              panelId: panel.id,
-              ownerAdminId: owner.id,
               limitBytes: 250,
-              usedBytes: 25,
-              inboundIds: ["vless:WS TLS:10002"],
-              expiresAt: "2030-01-02T03:04:05.000Z"
+              expiresAt: "2030-01-02T03:04:05.000Z",
+              note: "Reseller customer"
             }
           });
 
           assert.equal(created.username, "marz-user");
           assert.equal(created.panelId, panel.id);
           assert.equal(created.limitBytes, 250);
-          assert.equal(created.usedBytes, 25);
           assert.equal(created.inboundId, "vless:WS TLS:10002");
-          assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002"]);
+          assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002", "vmess:VMess TLS:10001"]);
+          assert.equal(created.note, "Reseller customer");
         }
       );
       const admins = await callApi(handleApi, {
@@ -1137,10 +1672,18 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
     }
   );
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
-  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
-  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[3].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
+  const remoteCreateBody = JSON.parse(calls[3].options.body);
+  assert.deepEqual(remoteCreateBody.inbounds, {
+    vless: ["WS TLS"],
+    vmess: ["VMess TLS"]
+  });
+  assert.equal(remoteCreateBody.note, "Reseller customer");
 });
 
 test("marzban user creation rolls back on remote failure", async () => {
@@ -1347,7 +1890,9 @@ test("marzban-backed user update updates remote before local state and prefers a
               inboundIds: ["vless:METRICS_DUMMY:123", "vless:Falkenstein VLESS WS TLS:10002"],
               inboundId: "vless:METRICS_DUMMY:123",
               inboundMode: "custom",
+              limitBytes: 400,
               expiresAt: "2030-02-03T04:05:06.000Z",
+              note: "Renew at month-end",
               flow: "xtls-rprx-vision",
               active: false
             }
@@ -1357,6 +1902,9 @@ test("marzban-backed user update updates remote before local state and prefers a
           assert.equal(updated.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
           assert.equal(updated.inboundMode, "custom");
           assert.deepEqual(updated.inboundIds, ["vless:METRICS_DUMMY:123", "vless:Falkenstein VLESS WS TLS:10002"]);
+          assert.equal(updated.limitBytes, 400);
+          assert.equal(updated.reservedBytes, 400);
+          assert.equal(updated.note, "Renew at month-end");
           assert.equal(updated.flow, "xtls-rprx-vision");
           assert.equal(updated.active, false);
         }
@@ -1370,12 +1918,24 @@ test("marzban-backed user update updates remote before local state and prefers a
       const stored = users.find((user) => user.username === "update-user");
       assert.equal(stored.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
       assert.equal(stored.inboundMode, "custom");
+      assert.equal(stored.limitBytes, 400);
+      assert.equal(stored.reservedBytes, 400);
+      assert.equal(stored.note, "Renew at month-end");
       assert.equal(stored.flow, "xtls-rprx-vision");
       assert.equal(stored.active, false);
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const updatedOwner = admins.find((admin) => admin.username === "update-owner");
+      assert.equal(updatedOwner.trafficRemainingBytes, 600);
       assert.equal(calls.length, 4);
       assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
       assert.equal(calls[3].url, "https://marzban.example.com/api/user/update-user");
       assert.equal(calls[3].options.method, "PUT");
+      assert.equal(JSON.parse(calls[3].options.body).data_limit, 400);
+      assert.equal(JSON.parse(calls[3].options.body).note, "Renew at month-end");
     }
   );
 });
@@ -1500,6 +2060,181 @@ test("marzban-backed user update rolls back when remote update fails", async () 
       const after = afterUsers.find((user) => user.username === "rollback-update-user");
       assert.deepEqual(after, before);
       assert.equal(calls.length, 4);
+    }
+  );
+});
+
+test("reseller-backed user update allows safe fields and rejects technical routing fields", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com/",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-edit-owner",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000,
+          validUntil: "2030-01-02T23:59:59.000Z"
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: owner.username, password: "admin-pass" }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              vless: [
+                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
+              ],
+              vmess: [
+                { tag: "VMess TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
+              ]
+            })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-user-2", username: "reseller-edit-user", status: "active" })
+          }
+        ],
+        calls,
+        async () => {
+          await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "reseller-edit-user",
+              limitBytes: 300,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "Initial note"
+            }
+          });
+        }
+      );
+
+      const beforeUpdateUsers = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: resellerLogin.session
+      });
+      const user = beforeUpdateUsers.find((item) => item.username === "reseller-edit-user");
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "reseller-edit-user", status: "disabled" })
+          }
+        ],
+        calls,
+        async () => {
+          const updated = await callApi(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${user.id}`,
+            session: resellerLogin.session,
+            body: {
+              limitBytes: 400,
+              expiresAt: "2030-02-03T04:05:06.000Z",
+              note: "Renew at month-end",
+              active: false
+            }
+          });
+          assert.equal(updated.limitBytes, 400);
+          assert.equal(updated.reservedBytes, 400);
+          assert.equal(updated.note, "Renew at month-end");
+          assert.equal(updated.active, false);
+        }
+      );
+
+      const afterSafeUsers = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/admin/users",
+        session: resellerLogin.session
+      });
+      const updatedUser = afterSafeUsers.find((item) => item.username === "reseller-edit-user");
+      assert.equal(updatedUser.limitBytes, 400);
+      assert.equal(updatedUser.reservedBytes, 400);
+      assert.equal(updatedUser.note, "Renew at month-end");
+      assert.equal(updatedUser.active, false);
+
+      const admins = await callApi(handleApi, {
+        method: "GET",
+        pathname: "/api/superadmin/admins",
+        session: login.session
+      });
+      const updatedOwner = admins.find((admin) => admin.username === "reseller-edit-owner");
+      assert.equal(updatedOwner.trafficRemainingBytes, 600);
+
+      const beforeRejectCalls = calls.length;
+      for (const field of ["inboundId", "inboundIds", "inboundMode", "flow", "panelId"]) {
+        const value = field === "inboundIds"
+          ? ["vless:WS TLS:10002"]
+          : field === "inboundMode"
+            ? "custom"
+            : field === "panelId"
+              ? panel.id
+              : "blocked-value";
+        const outcome = await callApiWithOutcome(handleApi, {
+          method: "PUT",
+          pathname: `/api/admin/users/${user.id}`,
+          session: resellerLogin.session,
+          body: { [field]: value }
+        });
+        assert.equal(outcome.statusCode, 400);
+        assert.match(outcome.json.error, new RegExp(`Cannot update ${field}`, "i"));
+      }
+      assert.equal(calls.length, beforeRejectCalls);
     }
   );
 });
@@ -3077,7 +3812,7 @@ test("marzban adapter updateUser sends the verified update payload", async () =>
           vless: {},
           vmess: {}
         },
-        note: "xtls-rprx-vision",
+        note: "",
         on_hold_expire_duration: 0,
         on_hold_timeout: null,
         next_plan: {
@@ -3382,8 +4117,7 @@ test("superadmin can fetch normalized marzban inbounds through the api", async (
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
 });
 
-test("reseller can load inbounds for its assigned marzban panel through the admin-scoped endpoint", async () => {
-  const calls = [];
+test("reseller cannot load inbounds for an assigned marzban panel", async () => {
   await withTempEnv(
     {
       AEGIS_ADMIN_USERNAME: "env-admin",
@@ -3427,45 +4161,13 @@ test("reseller can load inbounds for its assigned marzban panel through the admi
         pathname: "/api/auth/login",
         body: { username: reseller.username, password: "admin-pass" }
       });
-      await withMockFetch(
-        [
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ]
-            })
-          }
-        ],
-        calls,
-        async () => {
-          const res = await callApi(handleApi, {
-            method: "GET",
-            pathname: `/api/admin/panels/${panel.id}/inbounds`,
-            session: resellerLogin.session
-          });
-          assert.deepEqual(res, [
-            {
-              id: "vless:WS TLS:10002",
-              label: "WS TLS",
-              protocol: "vless",
-              network: "ws",
-              tls: "tls",
-              port: 10002,
-              enabled: true
-            }
-          ]);
-        }
-      );
-      assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
-      assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+      const res = await callApiWithOutcome(handleApi, {
+        method: "GET",
+        pathname: `/api/admin/panels/${panel.id}/inbounds`,
+        session: resellerLogin.session
+      });
+      assert.ok([403, 404].includes(res.statusCode));
+      assert.match(res.json.error, /Insufficient permissions|Panel not found/i);
     }
   );
 });
@@ -3531,8 +4233,8 @@ test("reseller cannot load inbounds for an unassigned marzban panel", async () =
         pathname: `/api/admin/panels/${other.id}/inbounds`,
         session: resellerLogin.session
       });
-      assert.equal(res.statusCode, 404);
-      assert.match(res.json.error, /Panel not found/i);
+      assert.ok([403, 404].includes(res.statusCode));
+      assert.match(res.json.error, /Insufficient permissions|Panel not found/i);
     }
   );
 });
@@ -3594,7 +4296,7 @@ test("superadmin can load inbounds through the admin-scoped endpoint", async () 
   );
 });
 
-test("reseller create vpn account flow uses the admin-scoped inbounds endpoint", async () => {
+test("reseller create vpn account flow works without inboundIds", async () => {
   const calls = [];
   await withTempEnv(
     {
@@ -3670,26 +4372,20 @@ test("reseller create vpn account flow uses the admin-scoped inbounds endpoint",
         ],
         calls,
         async () => {
-          const inbounds = await callApi(handleApi, {
-            method: "GET",
-            pathname: `/api/admin/panels/${panel.id}/inbounds`,
-            session: resellerLogin.session
-          });
           const created = await callApi(handleApi, {
             method: "POST",
             pathname: "/api/admin/users",
             session: resellerLogin.session,
             body: {
               username: "client-ok",
-              panelId: panel.id,
               limitBytes: 100,
               expiresAt: "2030-01-02T23:59:59.000Z",
-              inboundIds: [inbounds[0].id],
-              inboundId: inbounds[0].id
+              note: "default inbound policy"
             }
           });
           assert.equal(created.username, "client-ok");
-          assert.equal(created.inboundMode, "custom");
+          assert.equal(created.inboundMode, "all");
+          assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002"]);
         }
       );
       assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");

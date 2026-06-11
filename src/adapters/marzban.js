@@ -180,7 +180,7 @@ export async function listInbounds(panel) {
 
 export async function createUser(panel, user) {
   const client = buildClient(panel);
-  const body = buildUserPayload(user);
+  const body = buildUserPayload(user, { note: String(user?.note ?? "") });
   const accessToken = await authenticate(client);
   const response = await fetch(`${client.baseUrl}/api/user`, {
     method: "POST",
@@ -209,11 +209,12 @@ export async function updateUser(panel, user, changes = {}) {
     inboundIds: Array.isArray(changes.inboundIds) ? changes.inboundIds : user?.inboundIds,
     expiresAt: Object.prototype.hasOwnProperty.call(changes, "expiresAt") ? changes.expiresAt : user?.expiresAt,
     flow: Object.prototype.hasOwnProperty.call(changes, "flow") ? changes.flow : user?.flow,
+    note: Object.prototype.hasOwnProperty.call(changes, "note") ? changes.note : user?.note,
     active: Object.prototype.hasOwnProperty.call(changes, "active") ? changes.active : user?.active
   };
   const body = buildUserPayload(merged, {
     status: merged.active === false ? "disabled" : "active",
-    note: String(merged.flow ?? "")
+    note: String(merged.note ?? "")
   });
   const username = String(user?.username ?? "").trim();
   if (!username) fail(400, "Marzban username is required");
