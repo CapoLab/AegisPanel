@@ -3451,6 +3451,198 @@ test("panel credentials are stripped from api responses", async () => {
   );
 });
 
+test("superadmin can edit panels safely without exposing credentials", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const { store } = await import("../src/storage/store.js");
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+
+      const created = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Editable Panel",
+          type: "marzban",
+          url: "https://panel.example.com",
+          subscriptionUrl: "https://prefix.example.com",
+          subscriptionPath: "/links/",
+          username: "panel-user",
+          secret: "panel-secret",
+          syncIntervalSeconds: 300
+        }
+      });
+
+      const editable = await callApi(handleApi, {
+        method: "GET",
+        pathname: `/api/superadmin/panels/${created.id}`,
+        session: login.session
+      });
+      assert.equal(editable.username, "panel-user");
+      assert.equal(editable.secret, undefined);
+      assert.equal(editable.apiKey, undefined);
+
+      const blankSecretUpdate = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${created.id}`,
+        session: login.session,
+        body: {
+          name: "Editable Panel Updated",
+          type: "marzban",
+          url: "https://panel-updated.example.com",
+          subscriptionUrl: "https://prefix-updated.example.com",
+          subscriptionPath: "//sub-links//",
+          username: "panel-user-updated",
+          secret: "",
+          active: false,
+          syncIntervalSeconds: 900
+        }
+      });
+
+      assert.equal(blankSecretUpdate.username, undefined);
+      assert.equal(blankSecretUpdate.secret, undefined);
+      assert.equal(blankSecretUpdate.apiKey, undefined);
+
+      let panel = store.find("panels", created.id);
+      assert.equal(panel.name, "Editable Panel Updated");
+      assert.equal(panel.url, "https://panel-updated.example.com");
+      assert.equal(panel.subscriptionUrl, "https://prefix-updated.example.com");
+      assert.equal(panel.subscriptionPath, "sub-links");
+      assert.equal(panel.username, "panel-user-updated");
+      assert.equal(panel.secret, "panel-secret");
+      assert.equal(panel.active, false);
+      assert.equal(panel.syncIntervalSeconds, 900);
+
+      const credentialUpdate = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${created.id}`,
+        session: login.session,
+        body: {
+          name: "Editable Panel Updated",
+          url: "https://panel-updated.example.com",
+          subscriptionUrl: "https://prefix-updated.example.com",
+          subscriptionPath: "subscription",
+          username: "panel-user-updated",
+          secret: "panel-secret-updated",
+          active: true,
+          syncIntervalSeconds: 900
+        }
+      });
+
+      assert.equal(credentialUpdate.secret, undefined);
+      panel = store.find("panels", created.id);
+      assert.equal(panel.secret, "panel-secret-updated");
+      assert.equal(panel.subscriptionPath, "subscription");
+      assert.equal(panel.active, true);
+    }
+  );
+});
+
+test("panel edit rejects invalid values and non-superadmins cannot edit panels", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Invalid Panel",
+          type: "marzban",
+          url: "https://panel.example.com",
+          username: "panel-user",
+          secret: "panel-secret"
+        }
+      });
+      const invalidUrl = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${panel.id}`,
+        session: login.session,
+        body: {
+          name: "Invalid Panel",
+          url: "ftp://panel.example.com"
+        }
+      });
+      assert.equal(invalidUrl.statusCode, 400);
+      assert.match(invalidUrl.json.error, /Invalid url/i);
+
+      const invalidSubscriptionUrl = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${panel.id}`,
+        session: login.session,
+        body: {
+          name: "Invalid Panel",
+          subscriptionUrl: "vless://example@127.0.0.1:123"
+        }
+      });
+      assert.equal(invalidSubscriptionUrl.statusCode, 400);
+      assert.match(invalidSubscriptionUrl.json.error, /Invalid subscriptionUrl/i);
+
+      const normalizedPath = await callApi(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${panel.id}`,
+        session: login.session,
+        body: {
+          name: "Invalid Panel",
+          url: "https://panel-two.example.com",
+          subscriptionPath: "//custom-sub//"
+        }
+      });
+      assert.equal(normalizedPath.subscriptionPath, "custom-sub");
+
+      await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "panel-editor",
+          password: "editor-pass",
+          role: "admin",
+          panelId: panel.id
+        }
+      });
+      const adminLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "panel-editor", password: "editor-pass" }
+      });
+      const blocked = await callApiWithOutcome(handleApi, {
+        method: "PUT",
+        pathname: `/api/superadmin/panels/${panel.id}`,
+        session: adminLogin.session,
+        body: {
+          name: "Should not work",
+          url: "https://blocked.example.com"
+        }
+      });
+      assert.equal(blocked.statusCode, 403);
+      assert.match(blocked.json.error, /Insufficient permissions/i);
+    }
+  );
+});
+
 test("marzban adapter methods are explicit not-implemented skeletons", async () => {
   for (const method of ["sync"]) {
     await assert.rejects(marzbanAdapter[method](), (error) => {

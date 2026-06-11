@@ -11,6 +11,10 @@ const state = {
   news: [],
   system: null,
   syncingUserId: null,
+  editPanelId: "",
+  editPanel: null,
+  editPanelLoading: false,
+  editPanelError: "",
   createUserPanelId: "",
   createUserInbounds: [],
   createUserInboundsLoading: false,
@@ -217,6 +221,10 @@ function logout() {
   state.notice = "";
   state.error = "";
   state.createUserError = "";
+  state.editPanelId = "";
+  state.editPanel = null;
+  state.editPanelLoading = false;
+  state.editPanelError = "";
   state.editUserId = "";
   state.editUserUsername = "";
   state.editUserPanelId = "";
@@ -546,6 +554,7 @@ function panels() {
                 <td><span class="badge ${p.active ? "green" : "red"}">${p.active ? "Active" : "Off"}</span></td>
                 <td>${dateShort(p.lastSyncAt)}</td>
                 <td class="row-actions">
+                  <button class="ghost" onclick="window.Aegis.showEditPanelForm('${p.id}')">Edit</button>
                   <button class="ghost" onclick="window.Aegis.loadPanelInbounds('${p.id}')">View inbounds</button>
                   ${p.type === "marzban"
                     ? `<button class="ghost" disabled title="Marzban sync is not ready yet">Sync not ready</button>`
@@ -718,7 +727,7 @@ function modal(title, body) {
 function modalPanel(title, body) {
   const wide = String(title).toLowerCase().includes("inbounds") ? " wide-modal" : "";
   const titleLower = String(title).toLowerCase();
-  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") ? " edit-modal" : "";
+  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") ? " edit-modal" : "";
   return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
@@ -754,6 +763,59 @@ function showPanelForm() {
       <button class="primary" type="submit">Create panel</button>
     </form>
   `);
+}
+
+async function showEditPanelForm(id) {
+  if (!requireSuperadminUi()) return;
+  state.editPanelId = id;
+  state.editPanel = null;
+  state.editPanelError = "";
+  state.editPanelLoading = true;
+  modal("Edit panel", `<p class="muted">Loading panel...</p>`);
+  try {
+    state.editPanel = await api(`/api/superadmin/panels/${id}`);
+    state.editPanelLoading = false;
+    setModal("Edit panel", editPanelModalBody());
+  } catch (error) {
+    state.editPanelLoading = false;
+    setModal("Edit panel", `<p class="alert danger">${esc(error.message)}</p>`);
+  }
+}
+
+function editPanelModalBody() {
+  const panel = state.editPanel || {};
+  return `
+    <form class="form edit-panel-form" onsubmit="window.Aegis.savePanel(event)">
+      <div class="edit-panel-main">
+        <label>Name<input name="name" required value="${esc(panel.name || "")}" placeholder="Edge Tehran 01" /></label>
+        <label>Panel URL<input name="url" required value="${esc(panel.url || "")}" placeholder="https://panel.example.com" /></label>
+        <label>Subscription URL Prefix<input name="subscriptionUrl" value="${esc(panel.subscriptionUrl || "")}" placeholder="https://panel.example.com" /></label>
+        <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_URL_PREFIX</small>
+        <label>Username<input name="username" required value="${esc(panel.username || "")}" placeholder="panel admin, if needed" /></label>
+        <label>Secret/API key<input name="secret" type="password" placeholder="Leave blank to keep existing" /></label>
+      </div>
+      <div class="edit-panel-side">
+        <label>Type<select name="type" disabled><option value="${esc(panel.type || "")}" selected>${esc(panelLabel(panel.type) || panel.type || "-")}</option></select></label>
+        <label>Subscription Path<input name="subscriptionPath" value="${esc(panel.subscriptionPath || "sub")}" placeholder="sub" /></label>
+        <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_PATH. Default: sub</small>
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>${panel.active ? "Panel is active" : "Panel is disabled"}</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox"${panel.active !== false ? " checked" : ""} />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label>Sync interval seconds<input name="syncIntervalSeconds" type="number" min="0" step="1" value="${esc(panel.syncIntervalSeconds ?? 300)}" /></label>
+      </div>
+      <div class="edit-panel-footer">
+        <div id="edit-panel-error">${state.editPanelError ? `<p class="alert danger">${esc(state.editPanelError)}</p>` : ""}</div>
+        <button class="primary" type="submit">Save panel</button>
+      </div>
+    </form>
+  `;
 }
 
 function showAdminForm() {
@@ -1313,6 +1375,46 @@ async function createPanel(event) {
   }, "Panel created");
 }
 
+function refreshEditPanelError() {
+  const field = document.querySelector("#edit-panel-error");
+  if (!field) {
+    setModal("Edit panel", editPanelModalBody());
+    return;
+  }
+  field.innerHTML = state.editPanelError ? `<p class="alert danger">${esc(state.editPanelError)}</p>` : "";
+}
+
+async function savePanel(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const panel = state.editPanel;
+  state.error = "";
+  state.editPanelError = "";
+  refreshEditPanelError();
+  try {
+    if (!panel?.id) throw new Error("Panel not found");
+    await api(`/api/superadmin/panels/${panel.id}`, {
+      method: "PUT",
+      body: {
+        name: form.get("name"),
+        url: form.get("url"),
+        subscriptionUrl: form.get("subscriptionUrl") || "",
+        subscriptionPath: form.get("subscriptionPath") || "",
+        username: form.get("username"),
+        secret: form.get("secret") || "",
+        active: form.has("active"),
+        syncIntervalSeconds: form.get("syncIntervalSeconds")
+      }
+    });
+    closeModal();
+    state.notice = "Panel updated";
+    await load();
+  } catch (error) {
+    state.editPanelError = error.message;
+    refreshEditPanelError();
+  }
+}
+
 async function createAdmin(event) {
   event.preventDefault();
   const form = new FormData(event.target);
@@ -1838,7 +1940,7 @@ async function syncUserTraffic(id) {
   renderApp();
   try {
     const updated = await api(`/api/admin/users/${id}/sync-traffic`, { method: "POST" });
-    state.users = state.users.map((user) => (user.id === id ? { ...user, usedBytes: updated.usedBytes } : user));
+    state.users = state.users.map((user) => (user.id === id ? { ...user, ...updated } : user));
     if (state.data?.users) {
       state.data = {
         ...state.data,
@@ -1923,11 +2025,13 @@ window.Aegis = {
   load,
   closeModal,
   showPanelForm,
+  showEditPanelForm,
   showAdminForm,
   showUserForm,
   showEditUserForm,
   showNewsForm,
   createPanel,
+  savePanel,
   createAdmin,
   createUser,
   saveEditUser,

@@ -24,10 +24,62 @@ function publicPanel(panel) {
   return safe;
 }
 
+function editablePanel(panel) {
+  const { secret, apiKey, token, credentials, password, ...safe } = panel;
+  return safe;
+}
+
 function normalizeInboundSearchText(value) {
   if (value == null) return "";
   const normalized = String(value);
   return (typeof normalized.normalize === "function" ? normalized.normalize("NFKC") : normalized).toLowerCase();
+}
+
+function normalizePanelSubscriptionPath(value, fallback = "sub") {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  const normalized = trimmed.replace(/^\/+|\/+$/g, "");
+  return normalized || fallback;
+}
+
+function validateHttpUrl(value, key, { allowEmpty = false } = {}) {
+  if (value == null || value === "") {
+    if (allowEmpty) return "";
+    const error = new Error(`Missing required field: ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  if (typeof value !== "string") {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    if (allowEmpty) return "";
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Invalid protocol");
+    return trimmed;
+  } catch {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+}
+
+function parseOptionalNonNegativeNumber(value, key, fallback) {
+  if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    const error = new Error(`Invalid ${key}`);
+    error.status = 400;
+    throw error;
+  }
+  return parsed;
 }
 
 function isPublicSubscriptionUrl(value) {
@@ -422,19 +474,19 @@ export async function handleApi(req, res, route) {
     const body = await readJson(req);
     const name = requiredString(body, "name");
     const type = requiredString(body, "type");
-    const url = requiredString(body, "url");
+    const url = validateHttpUrl(requiredString(body, "url"), "url");
     if (!adapterFor(type)) return sendJson(res, 400, { ok: false, error: "Unsupported panel type" });
     const panel = store.insert("panels", {
       name,
       type,
       url,
-      subscriptionUrl: body.subscriptionUrl || "",
-      subscriptionPath: body.subscriptionPath || "sub",
+      subscriptionUrl: validateHttpUrl(body.subscriptionUrl ?? "", "subscriptionUrl", { allowEmpty: true }),
+      subscriptionPath: normalizePanelSubscriptionPath(body.subscriptionPath),
       username: body.username || "",
       secret: body.secret || "",
       apiKey: body.apiKey || "",
       active: body.active !== false,
-      syncIntervalSeconds: Number(body.syncIntervalSeconds || 300),
+      syncIntervalSeconds: parseOptionalNonNegativeNumber(body.syncIntervalSeconds, "syncIntervalSeconds", 300),
       lastSyncAt: null
     });
     store.audit(superadmin, "panel.create", panel.id, { name: panel.name, type: panel.type });
@@ -442,12 +494,40 @@ export async function handleApi(req, res, route) {
   }
 
   const panelId = match(pathname, "/api/superadmin/panels/:id");
+  if (panelId && method === "GET") {
+    requireAuth(req, "superadmin");
+    const panel = store.find("panels", panelId.id);
+    if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    return sendJson(res, 200, { ok: true, data: editablePanel(panel) });
+  }
   if (panelId && method === "PUT") {
     const superadmin = requireAuth(req, "superadmin");
-    const panel = store.update("panels", panelId.id, await readJson(req));
+    const body = await readJson(req);
+    const panel = store.find("panels", panelId.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
+    if (Object.prototype.hasOwnProperty.call(body, "type") && body.type !== panel.type) {
+      return sendJson(res, 400, { ok: false, error: "Panel type cannot be changed" });
+    }
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(body, "name")) patch.name = requiredString(body, "name");
+    if (Object.prototype.hasOwnProperty.call(body, "url")) patch.url = validateHttpUrl(body.url, "url");
+    if (Object.prototype.hasOwnProperty.call(body, "subscriptionUrl")) {
+      patch.subscriptionUrl = validateHttpUrl(body.subscriptionUrl, "subscriptionUrl", { allowEmpty: true });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "subscriptionPath")) {
+      patch.subscriptionPath = normalizePanelSubscriptionPath(body.subscriptionPath);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "username")) patch.username = requiredString(body, "username");
+    const credentialValue = [body.secret, body.password, body.apiKey].find((value) => typeof value === "string" && value.trim());
+    if (credentialValue) patch.secret = credentialValue.trim();
+    if (Object.prototype.hasOwnProperty.call(body, "active")) patch.active = body.active !== false;
+    if (Object.prototype.hasOwnProperty.call(body, "syncIntervalSeconds")) {
+      patch.syncIntervalSeconds = parseOptionalNonNegativeNumber(body.syncIntervalSeconds, "syncIntervalSeconds", panel.syncIntervalSeconds ?? 300);
+    }
+    const updated = store.update("panels", panelId.id, patch);
+    if (!updated) return sendJson(res, 404, { ok: false, error: "Panel not found" });
     store.audit(superadmin, "panel.update", panel.id);
-    return sendJson(res, 200, { ok: true, data: publicPanel(panel) });
+    return sendJson(res, 200, { ok: true, data: publicPanel(updated) });
   }
 
   if (panelId && method === "DELETE") {

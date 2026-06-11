@@ -750,6 +750,50 @@ small {
   display: none;
 }
 
+.edit-panel-form {
+  gap: 10px;
+}
+
+.edit-panel-form > div {
+  display: grid;
+  gap: 10px;
+}
+
+.edit-panel-form > div > label {
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.edit-panel-form input,
+.edit-panel-form select,
+.edit-panel-form textarea {
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.edit-panel-form input:hover,
+.edit-panel-form select:hover,
+.edit-panel-form textarea:hover {
+  border-color: rgba(148, 163, 184, 0.26);
+}
+
+.edit-panel-form input:focus,
+.edit-panel-form select:focus,
+.edit-panel-form textarea:focus {
+  border-color: rgba(59, 130, 246, 0.52);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  outline: none;
+}
+
+.edit-panel-form .switch-field {
+  margin-top: 2px;
+}
+
+.edit-panel-form .switch-field small {
+  font-size: 0.74rem;
+}
+
 .modal.edit-modal {
   width: min(940px, 100%);
 }
@@ -772,12 +816,25 @@ small {
   gap: 14px;
 }
 
+.edit-panel-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(270px, 0.9fr);
+  gap: 14px;
+}
+
 .edit-user-form.edit-user-simple {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .edit-user-main,
 .edit-user-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.edit-panel-main,
+.edit-panel-side {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -817,6 +874,12 @@ small {
 
 .edit-user-main input[readonly] {
   opacity: 0.94;
+}
+
+.edit-panel-form input:disabled,
+.edit-panel-form select:disabled {
+  opacity: 0.86;
+  cursor: not-allowed;
 }
 
 .edit-user-main input:hover,
@@ -952,6 +1015,18 @@ small {
 .edit-user-side .compact-panel {
   display: grid;
   gap: 10px;
+}
+
+.edit-panel-footer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.edit-panel-footer > button.primary {
+  min-width: 160px;
 }
 
 .compact-panel {
@@ -1320,6 +1395,10 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .edit-panel-form {
+    grid-template-columns: 1fr;
+  }
+
   .protocol-grid {
     grid-template-columns: 1fr;
   }
@@ -1328,7 +1407,17 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .edit-panel-footer {
+    grid-template-columns: 1fr;
+  }
+
   .edit-user-footer > button.primary {
+    justify-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .edit-panel-footer > button.primary {
     justify-self: stretch;
     width: 100%;
     min-width: 0;
