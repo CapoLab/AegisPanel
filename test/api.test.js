@@ -6735,8 +6735,9 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.doesNotMatch(dashboardSource, /Unified Dashboard/);
   assert.doesNotMatch(dashboardSource, /Panel adapters/);
   assert.doesNotMatch(dashboardSource, /Release mode/);
-  assert.match(dashboardSource, /<div class="card-head"><h3>Recent activity<\/h3><span class="muted">latest audit events<\/span><\/div>/);
-  assert.match(dashboardSource, /logsTable\(state\.logs\.slice\(0, 5\)\)/);
+  assert.doesNotMatch(dashboardSource, /Recent activity/);
+  assert.doesNotMatch(dashboardSource, /latest audit events/);
+  assert.doesNotMatch(dashboardSource, /logsTable\(state\.logs\.slice\(/);
   assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
   assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);

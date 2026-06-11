@@ -527,10 +527,6 @@ function dashboard() {
       ${metric("Users", totals.users, `${totals.activeUsers || 0} active users`)}
       ${metric("Traffic Used", bytes(totals.usedBytes), `${bytes(totals.limitBytes)} allocated to users`)}
     </section>
-    <section class="card section">
-      <div class="card-head"><h3>Recent activity</h3><span class="muted">latest audit events</span></div>
-      ${logsTable(state.logs.slice(0, 5))}
-    </section>
   `;
 }
 
