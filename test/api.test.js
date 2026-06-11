@@ -862,8 +862,7 @@ test("reseller validity persists on create and legacy resellers without validity
         pathname: "/api/admin/users",
         session: legacyLogin.session,
         body: {
-          username: "legacy-client",
-          panelId: panel.id
+          username: "legacy-client"
         }
       });
       assert.equal(vpnAccount.username, "legacy-client");
@@ -926,7 +925,6 @@ test("reseller validity blocks invalid vpn account expiries before remote create
             session: resellerLogin.session,
             body: {
               username: "client-missing",
-              panelId: panel.id,
               limitBytes: 100,
               inboundIds: ["vless:WS TLS:10002"]
             }
@@ -940,7 +938,6 @@ test("reseller validity blocks invalid vpn account expiries before remote create
             session: resellerLogin.session,
             body: {
               username: "client-late",
-              panelId: panel.id,
               limitBytes: 100,
               expiresAt: "2030-01-03T23:59:59.000Z",
               inboundIds: ["vless:WS TLS:10002"]
@@ -962,7 +959,6 @@ test("reseller validity blocks invalid vpn account expiries before remote create
             session: resellerLogin.session,
             body: {
               username: "client-expired",
-              panelId: panel.id,
               limitBytes: 100,
               expiresAt: "2030-01-02T23:59:59.000Z",
               inboundIds: ["vless:WS TLS:10002"]
@@ -2307,7 +2303,6 @@ test("reseller cannot edit another reseller's VPN account", async () => {
         session: ownerALogin.session,
         body: {
           username: "owner-a-user",
-          panelId: panel.id,
           limitBytes: 100,
           inboundId: "default",
           expiresAt: "2030-01-02T03:04:05.000Z"
@@ -4392,6 +4387,158 @@ test("reseller create vpn account flow works without inboundIds", async () => {
       assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
       assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
       assert.equal(calls[3].url, "https://marzban.example.com/api/user");
+    }
+  );
+});
+
+test("reseller create fails clearly when no panel is assigned", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-no-panel",
+          password: "admin-pass",
+          role: "admin",
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "admin-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: resellerLogin.session,
+        body: {
+          username: "client-missing-panel",
+          limitBytes: 100,
+          expiresAt: "2030-01-02T23:59:59.000Z",
+          note: "no panel"
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /No panel assigned to this reseller\./i);
+    }
+  );
+});
+
+test("reseller cannot override panelId manually on create", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Assigned Panel",
+          type: "marzban",
+          url: "https://assigned.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const other = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Other Panel",
+          type: "marzban",
+          url: "https://other.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "reseller-override",
+          password: "admin-pass",
+          role: "admin",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "admin-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: resellerLogin.session,
+        body: {
+          username: "client-override",
+          panelId: other.id,
+          limitBytes: 100,
+          expiresAt: "2030-01-02T23:59:59.000Z"
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Cannot set panelId/i);
+    }
+  );
+});
+
+test("superadmin create still requires panelId", async () => {
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const res = await callApiWithOutcome(handleApi, {
+        method: "POST",
+        pathname: "/api/admin/users",
+        session: login.session,
+        body: {
+          username: "super-client",
+          limitBytes: 100,
+          expiresAt: "2030-01-02T23:59:59.000Z"
+        }
+      });
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json.error, /Missing required field: panelId/i);
     }
   );
 });

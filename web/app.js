@@ -509,7 +509,7 @@ function admins() {
 
 function users() {
   return `
-    ${pageTitle("VPN Accounts", "Create reseller-scoped VPN accounts, assign panel/inbound, and control quota, expiry, flow, and deletion return.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
+    ${pageTitle("VPN Accounts", "Create and manage customer VPN accounts within your assigned quota and validity.", `<button class="primary" onclick="window.Aegis.showUserForm()">Create VPN account</button>`)}
     <section class="card">
       <p class="muted section-note">VPN accounts are created for reseller customers and should stay within the reseller's assigned traffic quota and validity period.</p>
       <div class="table-wrap">

@@ -444,9 +444,14 @@ export async function handleApi(req, res, route) {
   if (method === "POST" && pathname === "/api/admin/users") {
     const body = await readJson(req);
     const username = requiredString(body, "username");
-    const panelIdRaw = actor.role === "superadmin" ? requiredString(body, "panelId") : actor.panelId;
-    const panelIdValue = panelIdRaw;
-    const panel = store.find("panels", panelIdValue);
+    const effectivePanelId = actor.role === "superadmin" ? requiredString(body, "panelId") : actor.panelId;
+    if (actor.role !== "superadmin" && !effectivePanelId) {
+      return sendJson(res, 400, { ok: false, error: "No panel assigned to this reseller." });
+    }
+    if (actor.role === "admin" && Object.prototype.hasOwnProperty.call(body, "panelId")) {
+      return sendJson(res, 400, { ok: false, error: "Cannot set panelId" });
+    }
+    const panel = store.find("panels", effectivePanelId);
     if (!panel) return sendJson(res, 400, { ok: false, error: "Valid panelId is required" });
     const expiresAt = Object.prototype.hasOwnProperty.call(body, "expiresAt") ? normalizeIsoDateOrNull(body.expiresAt, "expiresAt") : null;
     enforceResellerValidity(actor, expiresAt);
