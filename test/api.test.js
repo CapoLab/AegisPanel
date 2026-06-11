@@ -3273,6 +3273,7 @@ test("panel credentials are stripped from api responses", async () => {
     async () => {
       const { handleApi } = await importFresh("../src/routes/api.js");
       const { store } = await import("../src/storage/store.js");
+      let rawUserId = "";
       const login = await callApi(handleApi, {
         method: "POST",
         pathname: "/api/auth/login",
@@ -3356,35 +3357,87 @@ test("panel credentials are stripped from api responses", async () => {
         session,
         body: {
           name: "Raw Subscription Panel",
-          type: "tx-ui",
-          url: "https://panel.example.com"
+          type: "marzban",
+          url: "https://marzban.example.com",
+          subscriptionUrl: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
         }
       });
-      const rawUser = await callApi(handleApi, {
-        method: "POST",
-        pathname: "/api/admin/users",
-        session,
-        body: {
-          username: "raw-sub-user",
-          panelId: rawPanel.id,
-          ownerAdminId: owner.id,
-          limitBytes: 10,
-          usedBytes: 0,
-          inboundId: "default",
-          expiresAt: "2030-01-02T00:00:00.000Z"
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ id: "remote-raw-sub-user", username: "raw-sub-user", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "raw-sub-user", subscription_url: "vless://example@127.0.0.1:123?path=%2F" })
+          }
+        ],
+        [],
+        async () => {
+          const rawUser = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session,
+            body: {
+              username: "raw-sub-user",
+              panelId: rawPanel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 10,
+              usedBytes: 0,
+              inboundIds: ["vless:WS TLS:10002"],
+              expiresAt: "2030-01-02T00:00:00.000Z"
+            }
+          });
+          rawUserId = rawUser.id;
         }
-      });
-      store.update("users", rawUser.id, {
+      );
+
+      store.update("users", rawUserId, {
         subscriptionUrl: "vless://example@127.0.0.1:123?path=%2F"
       });
 
-      const users = await callApi(handleApi, {
-        method: "GET",
-        pathname: "/api/admin/users",
-        session
-      });
-      const sanitizedUser = users.find((user) => user.username === "raw-sub-user");
-      assert.equal(sanitizedUser.subscriptionUrl, null);
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "raw-sub-user", subscription_url: "vless://example@127.0.0.1:123?path=%2F" })
+          }
+        ],
+        [],
+        async () => {
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session
+          });
+          const sanitizedUser = users.find((user) => user.username === "raw-sub-user");
+          assert.equal(sanitizedUser.subscriptionUrl, "https://marzban.example.com/sub/raw-sub-user");
+        }
+      );
+      const storedUser = store.list("users").find((user) => user.username === "raw-sub-user");
+      assert.equal(storedUser.subscriptionUrl, "https://marzban.example.com/sub/raw-sub-user");
 
       const backup = await callApi(handleApi, {
         method: "GET",

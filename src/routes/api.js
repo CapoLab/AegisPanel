@@ -42,6 +42,21 @@ function isPublicSubscriptionUrl(value) {
   }
 }
 
+function buildPublicSubscriptionUrl(panel, user) {
+  if (!isPublicSubscriptionUrl(panel?.subscriptionUrl)) return null;
+  const prefix = panel.subscriptionUrl.trim().replace(/\/+$/, "");
+  const path = typeof panel?.subscriptionPath === "string" && panel.subscriptionPath.trim()
+    ? panel.subscriptionPath.trim().replace(/^\/+|\/+$/g, "")
+    : "sub";
+  const identifier = typeof user?.subscriptionId === "string" && user.subscriptionId.trim()
+    ? user.subscriptionId.trim()
+    : typeof user?.username === "string" && user.username.trim()
+      ? user.username.trim()
+      : "";
+  if (!identifier) return null;
+  return `${prefix}/${path}/${encodeURIComponent(identifier)}`;
+}
+
 function publicUser(user) {
   const safe = { ...user };
   safe.inboundMode = normalizeInboundMode(safe.inboundMode);
@@ -57,7 +72,7 @@ function publicUser(user) {
 }
 
 async function hydrateSubscriptionUrlForUser(actor, user) {
-  if (!user || (typeof user.subscriptionUrl === "string" && user.subscriptionUrl.trim())) {
+  if (!user || isPublicSubscriptionUrl(user.subscriptionUrl)) {
     return user;
   }
   const panel = store.find("panels", user.panelId);
@@ -70,14 +85,19 @@ async function hydrateSubscriptionUrlForUser(actor, user) {
   }
   try {
     const remoteUser = await adapter.getUser(panel, user);
-    const subscriptionUrl = typeof remoteUser?.subscriptionUrl === "string" ? remoteUser.subscriptionUrl.trim() : "";
+    const subscriptionUrl = isPublicSubscriptionUrl(remoteUser?.subscriptionUrl)
+      ? remoteUser.subscriptionUrl.trim()
+      : buildPublicSubscriptionUrl(panel, remoteUser ?? user);
     if (!subscriptionUrl) return user;
     const patch = { subscriptionUrl };
     const subscriptionId = typeof remoteUser?.subscriptionId === "string" ? remoteUser.subscriptionId.trim() : "";
     if (subscriptionId && !user.subscriptionId) patch.subscriptionId = subscriptionId;
     return store.update("users", user.id, patch) || { ...user, ...patch };
   } catch {
-    return user;
+    const subscriptionUrl = buildPublicSubscriptionUrl(panel, user);
+    if (!subscriptionUrl) return user;
+    const patch = { subscriptionUrl };
+    return store.update("users", user.id, patch) || { ...user, ...patch };
   }
 }
 
