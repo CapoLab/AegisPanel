@@ -64,7 +64,7 @@ function isReseller() {
 }
 
 function roleScopedViews() {
-  return isReseller() ? ["dashboard", "users"] : ["dashboard", "panels", "admins", "users", "operations"];
+  return isReseller() ? ["dashboard", "users"] : ["dashboard", "panels", "admins", "operations"];
 }
 
 function requireSuperadminUi() {
@@ -83,6 +83,9 @@ function resetRoleScopedState() {
 
 function normalizeViewForRole() {
   if (isReseller() && !roleScopedViews().includes(state.view)) {
+    state.view = "dashboard";
+    localStorage.setItem("aegis.view", state.view);
+  } else if (isSuperadmin() && state.view === "users") {
     state.view = "dashboard";
     localStorage.setItem("aegis.view", state.view);
   }
@@ -328,7 +331,6 @@ function nav() {
         ["dashboard", "Dashboard", "Overview and live totals"],
         ["panels", "Panels", "Panel registry and sync"],
         ["admins", "Resellers", "SuperAdmin and reseller accounts"],
-        ["users", "Customer Users", "Customers and traffic"],
         ["operations", "Operations", "Backup, logs, system"]
       ];
   return items.map(([key, label, hint]) => `

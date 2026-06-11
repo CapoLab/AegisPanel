@@ -6711,12 +6711,24 @@ test("dashboard totals count reseller accounts only", async () => {
   );
 });
 
-test("superadmin sidebar and users copy use customer-user wording", async () => {
+test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  const roleViewsSource = source.slice(source.indexOf("function roleScopedViews()"), source.indexOf("function requireSuperadminUi()"));
   const navSource = source.slice(source.indexOf("function nav()"), source.indexOf("function shell("));
   const usersSource = source.slice(source.indexOf("function users()"), source.indexOf("function operations()"));
-  assert.match(navSource, /\["users", "Customer Users", "Customers and traffic"\]/);
-  assert.doesNotMatch(navSource, /\["users", "VPN Accounts", "Customers and traffic"\]/);
+  assert.match(roleViewsSource, /return isReseller\(\) \? \["dashboard", "users"\] : \["dashboard", "panels", "admins", "operations"\];/);
+  const superadminNav = navSource.match(/: \[\s*\n([\s\S]*?)\n\s*\];/);
+  assert.ok(superadminNav);
+  assert.doesNotMatch(superadminNav[1], /Customer Users|Users|VPN Accounts/);
+  assert.match(superadminNav[1], /\["dashboard", "Dashboard", "Overview and live totals"\]/);
+  assert.match(superadminNav[1], /\["panels", "Panels", "Panel registry and sync"\]/);
+  assert.match(superadminNav[1], /\["admins", "Resellers", "SuperAdmin and reseller accounts"\]/);
+  assert.match(superadminNav[1], /\["operations", "Operations", "Backup, logs, system"\]/);
+  const resellerNav = navSource.match(/\?\s*\[\s*\n([\s\S]*?)\n\s*\]\s*:\s*\[/);
+  assert.ok(resellerNav);
+  assert.match(resellerNav[1], /\["dashboard", "Dashboard", "Quota and validity"\]/);
+  assert.match(resellerNav[1], /\["users", "Users", "Customers and traffic"\]/);
+  assert.doesNotMatch(resellerNav[1], /Panels|Resellers|Operations/);
   assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);
   assert.match(usersSource, /<th>User<\/th>/);
   assert.match(usersSource, /No users yet\./);
