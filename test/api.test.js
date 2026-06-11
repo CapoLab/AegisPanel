@@ -6715,6 +6715,7 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
   const roleViewsSource = source.slice(source.indexOf("function roleScopedViews()"), source.indexOf("function requireSuperadminUi()"));
   const dashboardSource = source.slice(source.indexOf("function dashboard()"), source.indexOf("function panels()"));
+  const panelsSource = source.slice(source.indexOf("function panels()"), source.indexOf("function admins()"));
   const navSource = source.slice(source.indexOf("function nav()"), source.indexOf("function shell("));
   const usersSource = source.slice(source.indexOf("function users()"), source.indexOf("function operations()"));
   assert.match(roleViewsSource, /return isReseller\(\) \? \["dashboard", "users"\] : \["dashboard", "panels", "admins", "operations"\];/);
@@ -6736,6 +6737,12 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.doesNotMatch(dashboardSource, /Release mode/);
   assert.match(dashboardSource, /<div class="card-head"><h3>Recent activity<\/h3><span class="muted">latest audit events<\/span><\/div>/);
   assert.match(dashboardSource, /logsTable\(state\.logs\.slice\(0, 5\)\)/);
+  assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
+  assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
+  assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);
+  assert.match(panelsSource, /iconActionButton\("≡", "View inbounds"/);
+  assert.match(panelsSource, /iconActionButton\("↻", "Sync not ready"|iconActionButton\("↻", "Sync panel"/);
+  assert.match(panelsSource, /iconActionButton\("🗑", "Delete panel"/);
   assert.match(usersSource, /pageTitle\("Users", "Customer users and owner visibility across assigned quota and validity\.", "", \{ showRefresh: false \}\)/);
   assert.match(usersSource, /<th>User<\/th>/);
   assert.match(usersSource, /No users yet\./);

@@ -537,7 +537,7 @@ function dashboard() {
 function panels() {
   const rows = state.data?.panels || [];
   return `
-    ${pageTitle("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs.", `<button class="primary" onclick="window.Aegis.showPanelForm()">New panel</button>`)}
+    ${pageTitle("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs.", `<button class="primary" onclick="window.Aegis.showPanelForm()">New panel</button>`, { showRefresh: false })}
     <section class="card">
       <div class="table-wrap">
         <table class="table">
@@ -551,13 +551,13 @@ function panels() {
                 <td class="mono">${esc(p.subscriptionUrl || "-")}</td>
                 <td><span class="badge ${p.active ? "green" : "red"}">${p.active ? "Active" : "Off"}</span></td>
                 <td>${dateShort(p.lastSyncAt)}</td>
-                <td class="row-actions">
-                  <button class="ghost" onclick="window.Aegis.showEditPanelForm('${p.id}')">Edit</button>
-                  <button class="ghost" onclick="window.Aegis.loadPanelInbounds('${p.id}')">View inbounds</button>
+                <td class="row-actions icon-actions">
+                  ${iconActionButton("✎", "Edit panel", `window.Aegis.showEditPanelForm('${esc(p.id)}')`, { className: "edit-action" })}
+                  ${iconActionButton("≡", "View inbounds", `window.Aegis.loadPanelInbounds('${esc(p.id)}')`, { className: "inbounds-action" })}
                   ${p.type === "marzban"
-                    ? `<button class="ghost" disabled title="Marzban sync is not ready yet">Sync not ready</button>`
-                    : `<button class="ghost" onclick="window.Aegis.syncPanel('${p.id}')">Sync</button>`}
-                  <button class="danger-btn" onclick="window.Aegis.deletePanel('${p.id}')">Delete</button>
+                    ? iconActionButton("↻", "Sync not ready", "", { disabled: true, className: "sync-action" })
+                    : iconActionButton("↻", "Sync panel", `window.Aegis.syncPanel('${esc(p.id)}')`, { className: "sync-action" })}
+                  ${iconActionButton("🗑", "Delete panel", `window.Aegis.deletePanel('${esc(p.id)}')`, { className: "delete-action" })}
                 </td>
               </tr>
             `).join("") || emptyRow(7, "No panels configured yet.")}
