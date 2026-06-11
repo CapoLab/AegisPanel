@@ -57,17 +57,77 @@ function extractUsedBytes(payload) {
   return null;
 }
 
-function extractSubscriptionUrl(payload) {
+function readPath(payload, path) {
+  let node = payload;
+  for (const key of path) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+    node = node[key];
+  }
+  return typeof node === "string" ? node.trim() : null;
+}
+
+function isHttpSubscriptionUrl(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function resolveSubscriptionUrl(raw, panel) {
+  if (isHttpSubscriptionUrl(raw)) return raw.trim();
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  if (!trimmed || !/^\/(?:sub|subscription)(?:[/?#]|$)/i.test(trimmed)) return null;
+  const base = typeof panel?.subscriptionUrl === "string" && panel.subscriptionUrl.trim()
+    ? panel.subscriptionUrl.trim()
+    : typeof panel?.url === "string" && panel.url.trim()
+      ? panel.url.trim()
+      : "";
+  if (!base) return null;
+  try {
+    const baseUrl = new URL(base);
+    if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") return null;
+    const resolved = new URL(trimmed, baseUrl);
+    return resolved.protocol === "http:" || resolved.protocol === "https:" ? resolved.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractSubscriptionUrl(payload, panel) {
   const candidates = [
-    payload?.subscription_url,
-    payload?.subscriptionUrl,
-    payload?.sub_url,
-    payload?.data?.subscription_url,
-    payload?.data?.subscriptionUrl,
-    payload?.data?.sub_url
+    ["subscription_url"],
+    ["subscriptionUrl"],
+    ["sub_url"],
+    ["subUrl"],
+    ["sub_link"],
+    ["subLink"],
+    ["data", "subscription_url"],
+    ["data", "subscriptionUrl"],
+    ["data", "sub_url"],
+    ["data", "subUrl"],
+    ["data", "sub_link"],
+    ["data", "subLink"],
+    ["links", "subscription_url"],
+    ["links", "subscriptionUrl"],
+    ["links", "sub_url"],
+    ["links", "subUrl"],
+    ["links", "sub_link"],
+    ["links", "subLink"],
+    ["data", "links", "subscription_url"],
+    ["data", "links", "subscriptionUrl"],
+    ["data", "links", "sub_url"],
+    ["data", "links", "subUrl"],
+    ["data", "links", "sub_link"],
+    ["data", "links", "subLink"]
   ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  for (const path of candidates) {
+    const subscriptionUrl = resolveSubscriptionUrl(readPath(payload, path), panel);
+    if (subscriptionUrl) return subscriptionUrl;
   }
   return null;
 }
@@ -213,7 +273,7 @@ export async function createUser(panel, user) {
     id: payload?.id ?? payload?.data?.id ?? payload?.username ?? user?.username ?? null,
     username: payload?.username ?? payload?.data?.username ?? user?.username ?? null,
     status: payload?.status ?? payload?.data?.status ?? "active",
-    subscriptionUrl: extractSubscriptionUrl(payload)
+    subscriptionUrl: extractSubscriptionUrl(payload, panel)
   };
 }
 
@@ -295,7 +355,7 @@ export async function getUser(panel, user) {
   return {
     username,
     usedBytes: usedBytes ?? (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0),
-    subscriptionUrl: extractSubscriptionUrl(payload)
+    subscriptionUrl: extractSubscriptionUrl(payload, panel)
   };
 }
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJson } from "../src/utils/http.js";
@@ -436,6 +436,16 @@ test("editing traffic limit above reseller remaining quota is rejected before Ma
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-edit", username: "edit-remote", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "edit-remote", subscription_url: "https://marzban.example.com/sub/edit-remote" })
           }
         ],
         calls,
@@ -467,7 +477,7 @@ test("editing traffic limit above reseller remaining quota is rejected before Ma
       );
     }
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("editing traffic limit below usedBytes is rejected", async () => {
@@ -576,6 +586,16 @@ test("past expiry is rejected on edit before Marzban remote update", async () =>
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-past", username: "edit-past", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "edit-past", subscription_url: "https://marzban.example.com/sub/edit-past" })
           }
         ],
         calls,
@@ -610,7 +630,7 @@ test("past expiry is rejected on edit before Marzban remote update", async () =>
     }
   );
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("marzban remote update failure leaves local limitBytes, reservedBytes, and owner quota unchanged", async () => {
@@ -675,6 +695,16 @@ test("marzban remote update failure leaves local limitBytes, reservedBytes, and 
             json: async () => ({ access_token: "marzban-token" })
           },
           {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "edit-rollback", subscription_url: "https://marzban.example.com/sub/edit-rollback" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
             ok: false,
             status: 500,
             json: async () => ({ detail: "boom" })
@@ -728,7 +758,7 @@ test("marzban remote update failure leaves local limitBytes, reservedBytes, and 
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -1043,6 +1073,16 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "client-ok", subscription_url: "https://marzban.example.com/sub/client-ok" })
           }
         ],
         calls,
@@ -1070,7 +1110,7 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
           });
         }
       );
-      assert.equal(calls.length, 4);
+      assert.equal(calls.length, 6);
 
       const superadmin = await callApi(handleApi, {
         method: "POST",
@@ -1634,6 +1674,16 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-1", username: "marz-user", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "marz-user", subscription_url: "https://marzban.example.com/sub/marz-user" })
           }
         ],
         calls,
@@ -1668,7 +1718,7 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -1834,6 +1884,16 @@ test("marzban-backed user update updates remote before local state and prefers a
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-1", username: "update-user", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "update-user", subscription_url: "https://marzban.example.com/sub/update-user" })
           }
         ],
         calls,
@@ -1926,12 +1986,12 @@ test("marzban-backed user update updates remote before local state and prefers a
       });
       const updatedOwner = admins.find((admin) => admin.username === "update-owner");
       assert.equal(updatedOwner.trafficRemainingBytes, 600);
-      assert.equal(calls.length, 4);
-      assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
-      assert.equal(calls[3].url, "https://marzban.example.com/api/user/update-user");
-      assert.equal(calls[3].options.method, "PUT");
-      assert.equal(JSON.parse(calls[3].options.body).data_limit, 400);
-      assert.equal(JSON.parse(calls[3].options.body).note, "Renew at month-end");
+      assert.equal(calls.length, 6);
+      assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
+      assert.equal(calls[5].url, "https://marzban.example.com/api/user/update-user");
+      assert.equal(calls[5].options.method, "PUT");
+      assert.equal(JSON.parse(calls[5].options.body).data_limit, 400);
+      assert.equal(JSON.parse(calls[5].options.body).note, "Renew at month-end");
     }
   );
 });
@@ -1986,6 +2046,16 @@ test("marzban-backed user update rolls back when remote update fails", async () 
             ok: true,
             status: 201,
             json: async () => ({ id: "remote-user-1", username: "rollback-update-user", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "rollback-update-user", subscription_url: "https://marzban.example.com/sub/rollback-update-user" })
           }
         ],
         calls,
@@ -2055,7 +2125,7 @@ test("marzban-backed user update rolls back when remote update fails", async () 
       });
       const after = afterUsers.find((user) => user.username === "rollback-update-user");
       assert.deepEqual(after, before);
-      assert.equal(calls.length, 4);
+      assert.equal(calls.length, 6);
     }
   );
 });
@@ -2383,6 +2453,16 @@ test("marzban-backed delete removes remote first and then local state", async ()
           {
             ok: true,
             status: 200,
+            json: async () => ({ username: "delete-me", subscription_url: "https://marzban.example.com/sub/delete-me" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
             json: async () => ({ used_traffic: 250 })
           },
           {
@@ -2446,7 +2526,7 @@ test("marzban-backed delete removes remote first and then local state", async ()
     }
   );
 
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 9);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -2454,8 +2534,11 @@ test("marzban-backed delete removes remote first and then local state", async ()
   assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
   assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[5].url, "https://marzban.example.com/api/user/delete-me");
-  assert.equal(calls[5].options.method, "DELETE");
   assert.equal(calls[5].options.headers.authorization, "Bearer marzban-token");
+  assert.equal(calls[6].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[7].url, "https://marzban.example.com/api/user/delete-me");
+  assert.equal(calls[7].options.method, "DELETE");
+  assert.equal(calls[7].options.headers.authorization, "Bearer marzban-token");
 });
 
 test("marzban delete failure keeps the local user and quota untouched", async () => {
@@ -2515,6 +2598,16 @@ test("marzban delete failure keeps the local user and quota untouched", async ()
             json: async () => ({ access_token: "marzban-token" })
           },
           {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "keep-me", subscription_url: "https://marzban.example.com/sub/keep-me" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
             ok: false,
             status: 500,
             json: async () => ({ detail: "boom" })
@@ -2563,11 +2656,13 @@ test("marzban delete failure keeps the local user and quota untouched", async ()
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/keep-me");
+  assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[5].url, "https://marzban.example.com/api/user/keep-me");
 });
 
 test("marzban traffic lookup failure prevents delete and quota return", async () => {
@@ -2627,6 +2722,16 @@ test("marzban traffic lookup failure prevents delete and quota return", async ()
             json: async () => ({ access_token: "marzban-token" })
           },
           {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "lookup-fail", subscription_url: "https://marzban.example.com/sub/lookup-fail" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
             ok: false,
             status: 500,
             json: async () => ({ detail: "boom" })
@@ -2675,11 +2780,13 @@ test("marzban traffic lookup failure prevents delete and quota return", async ()
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/lookup-fail");
+  assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[5].url, "https://marzban.example.com/api/user/lookup-fail");
 });
 
 test("marzban single-user traffic sync updates local usedBytes", async () => {
@@ -2741,6 +2848,16 @@ test("marzban single-user traffic sync updates local usedBytes", async () => {
           {
             ok: true,
             status: 200,
+            json: async () => ({ username: "sync-me", subscription_url: "https://marzban.example.com/sub/sync-me" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
             json: async () => ({ used_traffic: 432 })
           }
         ],
@@ -2779,7 +2896,7 @@ test("marzban single-user traffic sync updates local usedBytes", async () => {
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -2892,7 +3009,7 @@ test("marzban single-user traffic sync preserves existing subscriptionUrl when r
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
@@ -2956,6 +3073,16 @@ test("marzban single-user traffic sync failure leaves local usedBytes unchanged"
             json: async () => ({ access_token: "marzban-token" })
           },
           {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "sync-fail", subscription_url: "https://marzban.example.com/sub/sync-fail" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
             ok: false,
             status: 500,
             json: async () => ({ detail: "boom" })
@@ -2997,11 +3124,13 @@ test("marzban single-user traffic sync failure leaves local usedBytes unchanged"
     }
   );
 
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user");
   assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[3].url, "https://marzban.example.com/api/user/sync-fail");
+  assert.equal(calls[4].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[5].url, "https://marzban.example.com/api/user/sync-fail");
 });
 
 test("missing user returns 404 for single-user traffic sync", async () => {
@@ -3380,7 +3509,10 @@ test("marzban getUser looks up remote traffic with Bearer auth", async () => {
       {
         ok: true,
         status: 200,
-        json: async () => ({ used_traffic: 321, subscription_url: "https://marzban.example.com/sub/alice" })
+        json: async () => ({
+          used_traffic: 321,
+          data: { links: { subscriptionUrl: "https://marzban.example.com/sub/alice" } }
+        })
       }
     ],
     calls,
@@ -3409,6 +3541,87 @@ test("marzban getUser looks up remote traffic with Bearer auth", async () => {
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
   assert.equal(calls[1].url, "https://marzban.example.com/api/user/alice");
   assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+});
+
+test("marzban getUser ignores raw config links when resolving subscriptionUrl", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          used_traffic: 321,
+          subscription_url: "vless://example@127.0.0.1:123?path=%2F"
+        })
+      }
+    ],
+    [],
+    async () => {
+      const result = await marzbanAdapter.getUser(
+        {
+          url: "https://marzban.example.com",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 10
+        }
+      );
+
+      assert.deepEqual(result, {
+        username: "alice",
+        usedBytes: 321,
+        subscriptionUrl: null
+      });
+    }
+  );
+});
+
+test("marzban getUser resolves a relative subscription path against the panel base", async () => {
+  await withMockFetch(
+    [
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "marzban-token" })
+      },
+      {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          used_traffic: 321,
+          data: { links: { subUrl: "/sub/alice" } }
+        })
+      }
+    ],
+    [],
+    async () => {
+      const result = await marzbanAdapter.getUser(
+        {
+          url: "https://marzban.example.com/",
+          subscriptionUrl: "https://marzban.example.com/subscriptions/",
+          username: "admin",
+          password: "secret"
+        },
+        {
+          username: "alice",
+          usedBytes: 10
+        }
+      );
+
+      assert.deepEqual(result, {
+        username: "alice",
+        usedBytes: 321,
+        subscriptionUrl: "https://marzban.example.com/sub/alice"
+      });
+    }
+  );
 });
 
 test("marzban getUser falls back to local usedBytes when remote traffic is missing", async () => {
@@ -3527,6 +3740,192 @@ test("marzban createUser sends the verified create payload", async () => {
   );
 });
 
+test("marzban-backed create backfills subscriptionUrl from remote lookup when the create response omits it", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "create-link-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({ username: "create-link-user", status: "active" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              username: "create-link-user",
+              data: {
+                links: { sub_url: "/sub/create-link-user" }
+              }
+            })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "create-link-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 100,
+              usedBytes: 0,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              inboundIds: ["vless:WS TLS:10002"],
+              inboundId: "vless:WS TLS:10002"
+            }
+          });
+
+          assert.equal(created.subscriptionUrl, "https://marzban.example.com/sub/create-link-user");
+          assert.equal(calls.length, 4);
+          assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
+          assert.equal(calls[3].url, "https://marzban.example.com/api/user/create-link-user");
+        }
+      );
+    }
+  );
+});
+
+test("marzban-backed create does not store raw config links as subscriptionUrl", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const owner = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "raw-link-owner",
+          password: "admin-pass",
+          trafficLimitBytes: 1000
+        }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Marzban Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 201,
+            json: async () => ({
+              username: "raw-link-user",
+              subscription_url: "vless://example@127.0.0.1:123?path=%2F"
+            })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "raw-link-user" })
+          }
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: login.session,
+            body: {
+              username: "raw-link-user",
+              panelId: panel.id,
+              ownerAdminId: owner.id,
+              limitBytes: 100,
+              usedBytes: 0,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              inboundIds: ["vless:WS TLS:10002"],
+              inboundId: "vless:WS TLS:10002"
+            }
+          });
+
+          assert.equal(created.subscriptionUrl ?? null, null);
+          assert.equal(calls.length, 4);
+        }
+      );
+    }
+  );
+});
+
 test("marzban createUser keeps metrics in inboundIds but prefers a real inbound for the local primary id", async () => {
   const calls = [];
   await withTempEnv(
@@ -3577,6 +3976,16 @@ test("marzban createUser keeps metrics in inboundIds but prefers a real inbound 
             ok: true,
             status: 201,
             json: async () => ({ username: "metrics-preferred-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "metrics-preferred-user", subscription_url: "https://marzban.example.com/sub/metrics-preferred-user" })
           }
         ],
         calls,
@@ -3613,7 +4022,7 @@ test("marzban createUser keeps metrics in inboundIds but prefers a real inbound 
       assert.equal(ownerAfter.trafficRemainingBytes, 750);
     }
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("marzban createUser prefers a real inbound even when styled metrics text is selected", async () => {
@@ -3666,6 +4075,16 @@ test("marzban createUser prefers a real inbound even when styled metrics text is
             ok: true,
             status: 201,
             json: async () => ({ username: "styled-metrics-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "styled-metrics-user", subscription_url: "https://marzban.example.com/sub/styled-metrics-user" })
           }
         ],
         calls,
@@ -3698,7 +4117,7 @@ test("marzban createUser prefers a real inbound even when styled metrics text is
       });
       const createdUser = users.find((user) => user.username === "styled-metrics-user");
       assert.equal(createdUser.inboundId, "vless:Falkenstein VLESS WS TLS:10002");
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 4);
     }
   );
 });
@@ -3753,6 +4172,16 @@ test("marzban createUser allows metrics-only inbound selection", async () => {
             ok: true,
             status: 201,
             json: async () => ({ username: "metrics-only-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "metrics-only-user", subscription_url: "https://marzban.example.com/sub/metrics-only-user" })
           }
         ],
         calls,
@@ -3789,7 +4218,7 @@ test("marzban createUser allows metrics-only inbound selection", async () => {
       assert.equal(ownerAfter.trafficRemainingBytes, 900);
     }
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("marzban createUser stores inboundMode all when all selected inbounds are sent", async () => {
@@ -3842,6 +4271,16 @@ test("marzban createUser stores inboundMode all when all selected inbounds are s
             ok: true,
             status: 201,
             json: async () => ({ username: "all-mode-user" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ username: "all-mode-user", subscription_url: "https://marzban.example.com/sub/all-mode-user" })
           }
         ],
         calls,
@@ -3869,7 +4308,7 @@ test("marzban createUser stores inboundMode all when all selected inbounds are s
           assert.deepEqual(created.inboundIds, ["vless:WS TLS:10002", "vmess:VMESS TLS:10001"]);
         }
       );
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 4);
     }
   );
 });

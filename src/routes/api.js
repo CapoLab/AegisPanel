@@ -41,6 +41,28 @@ function publicUser(user) {
   return safe;
 }
 
+async function hydrateSubscriptionUrlForUser(actor, user) {
+  if (!user || (typeof user.subscriptionUrl === "string" && user.subscriptionUrl.trim())) {
+    return user;
+  }
+  const panel = store.find("panels", user.panelId);
+  if (!panel || panel.type !== "marzban") {
+    return user;
+  }
+  const adapter = adapterFor(panel.type);
+  if (!adapter || typeof adapter.getUser !== "function") {
+    return user;
+  }
+  try {
+    const remoteUser = await adapter.getUser(panel, user);
+    const subscriptionUrl = typeof remoteUser?.subscriptionUrl === "string" ? remoteUser.subscriptionUrl.trim() : "";
+    if (!subscriptionUrl) return user;
+    return store.update("users", user.id, { subscriptionUrl }) || { ...user, subscriptionUrl };
+  } catch {
+    return user;
+  }
+}
+
 function normalizeInboundMode(value) {
   return value === "all" ? "all" : "custom";
 }
@@ -438,7 +460,11 @@ export async function handleApi(req, res, route) {
   }
 
   if (method === "GET" && pathname === "/api/admin/users") {
-    return sendJson(res, 200, { ok: true, data: scopedUsers(actor).map(publicUser) });
+    const users = [];
+    for (const user of scopedUsers(actor)) {
+      users.push(await hydrateSubscriptionUrlForUser(actor, user));
+    }
+    return sendJson(res, 200, { ok: true, data: users.map(publicUser) });
   }
 
   if (method === "POST" && pathname === "/api/admin/users") {
@@ -528,8 +554,19 @@ export async function handleApi(req, res, route) {
           inboundIds: userRecord.inboundIds || [],
           expiresAt
         });
-        if (Object.prototype.hasOwnProperty.call(remoteUser || {}, "subscriptionUrl")) {
-          const subscriptionUrl = remoteUser?.subscriptionUrl ?? null;
+        let subscriptionUrl = typeof remoteUser?.subscriptionUrl === "string" ? remoteUser.subscriptionUrl.trim() : "";
+        if (!subscriptionUrl && typeof adapter.getUser === "function") {
+          try {
+            const refreshedUser = await adapter.getUser(panel, {
+              username: remoteUser?.username ?? user.username,
+              usedBytes: user.usedBytes
+            });
+            subscriptionUrl = typeof refreshedUser?.subscriptionUrl === "string" ? refreshedUser.subscriptionUrl.trim() : "";
+          } catch {
+            subscriptionUrl = "";
+          }
+        }
+        if (subscriptionUrl) {
           createdUser = store.update("users", user.id, { subscriptionUrl }) || user;
         }
       } catch (error) {

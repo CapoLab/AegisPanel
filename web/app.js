@@ -379,11 +379,52 @@ function singleUserLabel() {
   return isReseller() ? "User" : "VPN account";
 }
 
-function renderSubscriptionLinkAction(user) {
-  if (!user?.subscriptionUrl) {
-    return `<span class="muted">No link</span>`;
+function iconActionButton(icon, title, onclick, { disabled = false, className = "" } = {}) {
+  const disabledAttr = disabled ? " disabled" : "";
+  const clickAttr = disabled ? "" : ` onclick="${onclick}"`;
+  const label = esc(title);
+  return `<button class="ghost icon-action ${className}" title="${label}" aria-label="${label}"${disabledAttr}${clickAttr}><span aria-hidden="true">${icon}</span></button>`;
+}
+
+function renderExpirySummary(value) {
+  if (!value) {
+    return `<div class="expiry-summary"><strong>Unlimited</strong></div>`;
   }
-  return `<button class="ghost" onclick="window.Aegis.copySubscriptionLink('${esc(user.id)}')">Copy Link</button>`;
+  const short = dateShort(value);
+  const helper = relativeExpiryText(value);
+  return `<div class="expiry-summary"><strong>${esc(short)}</strong>${helper ? `<small class="muted block">${esc(helper)}</small>` : ""}</div>`;
+}
+
+function renderSubscriptionLinkAction(user) {
+  if (!isValidSubscriptionUrl(user?.subscriptionUrl)) {
+    return iconActionButton("🔗", "No subscription link", "", { disabled: true, className: "link-action" });
+  }
+  return iconActionButton("🔗", "Copy subscription link", `window.Aegis.copySubscriptionLink('${esc(user.id)}')`, { className: "link-action" });
+}
+
+function renderUserRowActions(user, { compact = false } = {}) {
+  const editLabel = compact ? "Edit" : "Edit User";
+  const deleteLabel = compact ? "Delete" : "Delete User";
+  const syncLabel = state.syncingUserId === user.id ? "Syncing..." : "Sync traffic";
+  return `
+    ${iconActionButton("✎", editLabel, `window.Aegis.showEditUserForm('${esc(user.id)}')`, { className: "edit-action" })}
+    ${renderSubscriptionLinkAction(user)}
+    ${iconActionButton("↻", syncLabel, `window.Aegis.syncUserTraffic('${esc(user.id)}')`, {
+      disabled: state.syncingUserId === user.id,
+      className: "sync-action"
+    })}
+    ${iconActionButton("🗑", deleteLabel, `window.Aegis.deleteUser('${esc(user.id)}')`, { className: "delete-action" })}
+  `;
+}
+
+function isValidSubscriptionUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function dashboard() {
@@ -558,26 +599,19 @@ function users() {
         <div class="table-wrap">
           <table class="table">
             <thead><tr><th>User</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              ${rows.map((u) => `
-                <tr>
-                  <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
-                  <td>${bytes(u.usedBytes)}</td>
-                  <td>${bytes(u.limitBytes)}</td>
-                  <td>${dateShort(u.expiresAt)}</td>
-                  <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
-                  <td class="row-actions">
-                    <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit User</button>
-                    ${renderSubscriptionLinkAction(u)}
-                    <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
-                      ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
-                    </button>
-                    <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete User</button>
-                  </td>
-                </tr>
-              `).join("") || emptyRow(6, "No users yet.")}
-            </tbody>
-          </table>
+              <tbody>
+                ${rows.map((u) => `
+                  <tr>
+                    <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
+                    <td>${bytes(u.usedBytes)}</td>
+                    <td>${bytes(u.limitBytes)}</td>
+                    <td>${renderExpirySummary(u.expiresAt)}</td>
+                    <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
+                    <td class="row-actions icon-actions">${renderUserRowActions(u, { compact: true })}</td>
+                  </tr>
+                `).join("") || emptyRow(6, "No users yet.")}
+              </tbody>
+            </table>
         </div>
       </section>
     `;
@@ -589,28 +623,21 @@ function users() {
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>VPN Account</th><th>Panel</th><th>Inbound</th><th>Used</th><th>Limit</th><th>Expiry</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            ${state.users.map((u) => `
-              <tr>
-                <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
-                <td>${esc(panelName(u.panelId))}</td>
-                <td>${esc(vpnAccountInboundSummary(u))}</td>
-                <td>${bytes(u.usedBytes)}</td>
-                <td>${bytes(u.limitBytes)}</td>
-                <td>${dateShort(u.expiresAt)}</td>
-                <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
-                <td class="row-actions">
-                  <button class="ghost" onclick="window.Aegis.showEditUserForm('${u.id}')">Edit</button>
-                  ${renderSubscriptionLinkAction(u)}
-                  <button class="ghost" ${state.syncingUserId === u.id ? "disabled" : `onclick="window.Aegis.syncUserTraffic('${u.id}')"`}>
-                    ${state.syncingUserId === u.id ? "Syncing..." : "Sync traffic"}
-                  </button>
-                  <button class="danger-btn" onclick="window.Aegis.deleteUser('${u.id}')">Delete</button>
-                </td>
-              </tr>
-            `).join("") || emptyRow(8, "No VPN accounts yet.")}
-          </tbody>
-        </table>
+              <tbody>
+                ${state.users.map((u) => `
+                  <tr>
+                    <td><strong>${esc(u.username)}</strong><small class="block mono">${esc(u.uuid || u.subscriptionId || "")}</small></td>
+                    <td>${esc(panelName(u.panelId))}</td>
+                    <td>${esc(vpnAccountInboundSummary(u))}</td>
+                    <td>${bytes(u.usedBytes)}</td>
+                    <td>${bytes(u.limitBytes)}</td>
+                    <td>${renderExpirySummary(u.expiresAt)}</td>
+                    <td><span class="badge ${u.active ? "green" : "red"}">${u.active ? "Active" : "Off"}</span></td>
+                    <td class="row-actions icon-actions">${renderUserRowActions(u)}</td>
+                  </tr>
+                `).join("") || emptyRow(8, "No VPN accounts yet.")}
+              </tbody>
+            </table>
       </div>
     </section>
   `;
@@ -1828,7 +1855,7 @@ async function syncUserTraffic(id) {
 async function copySubscriptionLink(id) {
   const user = state.users?.find((item) => item.id === id);
   const link = user?.subscriptionUrl;
-  if (!link) {
+  if (!isValidSubscriptionUrl(link)) {
     state.error = "Could not copy subscription link";
     renderApp();
     return;
