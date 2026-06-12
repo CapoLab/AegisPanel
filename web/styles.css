@@ -465,6 +465,437 @@ small {
   gap: 12px;
 }
 
+.edit-admin-form .compact-inbound-picker {
+  gap: 8px;
+}
+
+.edit-admin-form.reseller-modal {
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 0.88fr);
+  gap: 12px;
+}
+
+.edit-admin-form.reseller-modal .edit-panel-main,
+.edit-admin-form.reseller-modal .edit-panel-side {
+  gap: 8px;
+}
+
+.edit-admin-form.reseller-modal .edit-panel-main label {
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.edit-admin-form.reseller-modal .edit-panel-main input,
+.edit-admin-form.reseller-modal .edit-panel-main select,
+.edit-admin-form.reseller-modal .edit-panel-main textarea {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: 10px;
+}
+
+.edit-admin-form.reseller-modal .card-head .ghost,
+.edit-admin-form.reseller-modal .edit-panel-footer > button.primary {
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: 9px;
+  font-size: 0.84rem;
+}
+
+.edit-admin-form.reseller-modal .edit-panel-footer {
+  padding-top: 2px;
+}
+
+.edit-admin-form.reseller-modal .edit-panel-footer > button.primary {
+  min-height: 36px;
+  padding-left: 12px;
+  padding-right: 12px;
+  font-weight: 700;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-head {
+  margin-bottom: 0;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-head h4 {
+  font-size: 0.92rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-actions {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-actions .ghost {
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-group {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-card {
+  padding: 8px 9px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-card .protocol-card-body {
+  gap: 2px;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-card strong {
+  font-size: 0.82rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-protocol-card small,
+.edit-admin-form.reseller-modal .reseller-protocol-card span {
+  font-size: 0.72rem;
+}
+
+.edit-admin-form.reseller-modal .protocol-card-menu {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  pointer-events: auto;
+}
+
+.edit-admin-form.reseller-modal .reseller-config-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 10px;
+  position: relative;
+  overflow: visible;
+}
+
+.edit-admin-form.reseller-modal .reseller-config-panel .card-head {
+  margin-bottom: 6px;
+}
+
+.edit-admin-form.reseller-modal .reseller-config-checklist {
+  max-height: 250px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.edit-admin-form.reseller-modal .reseller-inbound-warning {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.edit-admin-form.reseller-modal .protocol-option {
+  padding: 8px 9px;
+  border-radius: 10px;
+}
+
+.edit-admin-form.reseller-modal .protocol-option strong {
+  font-size: 0.88rem;
+}
+
+.edit-admin-form.reseller-modal .protocol-option small {
+  font-size: 0.74rem;
+}
+
+.edit-admin-form.reseller-modal .expiry-picker.reseller-date-field {
+  gap: 4px;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-field > label {
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell {
+  position: relative;
+  min-width: 0;
+  overflow: visible;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-display {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 32px 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  box-shadow: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell.open .reseller-date-display {
+  border-color: rgba(168, 85, 247, 0.38);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.09);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-display:hover {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(20, 26, 44, 0.96);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-display:focus-visible {
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+  outline: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-display-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-icon {
+  width: 14px;
+  height: 14px;
+  right: 10px;
+  color: var(--muted);
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: block;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-native {
+  display: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-clear {
+  width: 22px;
+  height: 22px;
+  right: 8px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  z-index: 2;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-clear:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell:not(.has-value) .reseller-date-display-value {
+  display: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell:not(.has-value) .reseller-date-display {
+  padding-right: 30px;
+  justify-content: flex-end;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell.has-value .reseller-date-display {
+  padding-right: 32px;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell.has-value .reseller-date-icon {
+  display: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-shell:not(.has-value) .reseller-date-clear {
+  display: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-popover {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  top: calc(100% + 8px);
+  width: min(308px, 100%);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(18, 24, 40, 0.98), rgba(13, 18, 30, 0.98));
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.45);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-popover.open-up {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-popover-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-popover-head strong {
+  text-align: center;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-nav,
+.edit-admin-form.reseller-modal .reseller-date-mini {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-calendar > span {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.67rem;
+  padding-bottom: 2px;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day:hover:not(.empty) {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day.today {
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day.selected {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.14);
+  color: #dbeafe;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day.disabled {
+  color: rgba(148, 163, 184, 0.42);
+  background: rgba(255, 255, 255, 0.01);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-day.empty {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.edit-admin-form.reseller-modal .reseller-date-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.edit-admin-form.reseller-modal .reseller-status-switch {
+  padding: 7px 9px;
+  border-radius: 11px;
+}
+
+.edit-admin-form.reseller-modal .reseller-switch-row {
+  display: grid;
+  gap: 8px;
+}
+
+.edit-admin-form.reseller-modal .reseller-return-switch {
+  padding: 7px 9px;
+  border-radius: 11px;
+}
+
+.edit-admin-form.reseller-modal .reseller-return-switch strong {
+  font-size: 0.82rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-return-switch small {
+  font-size: 0.72rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-status-switch strong {
+  font-size: 0.82rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-status-switch small {
+  font-size: 0.72rem;
+}
+
+.edit-admin-form.reseller-modal .reseller-modal-actions,
+.edit-admin-form.reseller-modal .edit-panel-footer {
+  gap: 8px;
+}
+
+.edit-admin-form .compact-inbound-picker .card-head {
+  margin-bottom: 6px;
+}
+
+.edit-admin-form .compact-inbound-picker .card-head h4 {
+  font-size: 0.92rem;
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-picker-actions {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-picker-actions .ghost {
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 0.77rem;
+}
+
 .inbound-group {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -520,6 +951,44 @@ small {
 .inbound-option small {
   margin-top: 4px;
   color: var(--muted);
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-group {
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-group-title {
+  padding: 8px 10px;
+  font-size: 0.74rem;
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-checklist {
+  gap: 6px;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-option {
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-option.selected {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-option strong {
+  font-size: 0.9rem;
+}
+
+.edit-admin-form .compact-inbound-picker .inbound-option small {
+  margin-top: 2px;
+  font-size: 0.78rem;
 }
 
 .expiry-picker {
@@ -827,6 +1296,14 @@ small {
   background: var(--surface-2);
 }
 
+.edit-admin-form .edit-panel-main input,
+.edit-admin-form .edit-panel-main select,
+.edit-admin-form .edit-panel-main textarea {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: 10px;
+}
+
 .edit-panel-form input:hover,
 .edit-panel-form select:hover,
 .edit-panel-form textarea:hover {
@@ -862,7 +1339,10 @@ small {
 }
 
 .modal.edit-modal .card-head .ghost {
-  padding: 7px 10px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  font-size: 0.84rem;
 }
 
 .edit-user-form {
@@ -1477,6 +1957,14 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .edit-admin-form.reseller-modal .reseller-protocol-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .edit-admin-form.reseller-modal .reseller-config-checklist {
+    max-height: 220px;
+  }
+
   .protocol-grid {
     grid-template-columns: 1fr;
   }
@@ -1503,6 +1991,10 @@ small {
 
   .compact-panel {
     padding: 10px;
+  }
+
+  .edit-admin-form .compact-inbound-picker .inbound-checklist {
+    max-height: 260px;
   }
 }
 

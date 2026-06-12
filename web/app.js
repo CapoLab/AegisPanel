@@ -27,10 +27,20 @@ const state = {
   editAdminInbounds: [],
   editAdminInboundsLoading: false,
   editAdminInboundsError: "",
+  editAdminInboundsWarning: "",
   editAdminInboundIds: [],
+  createAdminInboundProtocolOpen: "",
+  editAdminInboundProtocolOpen: "",
   editAdminLimitGb: "",
   editAdminRemainingGb: "",
   editAdminValidUntilDate: "",
+  createAdminValidUntilDate: "",
+  createAdminValidUntilPickerOpen: false,
+  createAdminValidUntilMonth: "",
+  createAdminValidUntilPlacement: "down",
+  editAdminValidUntilPickerOpen: false,
+  editAdminValidUntilMonth: "",
+  editAdminValidUntilPlacement: "down",
   editAdminActive: true,
   editAdminDeleteReturnTraffic: true,
   editAdminUpdateReturnTraffic: true,
@@ -255,13 +265,16 @@ function logout() {
   state.createAdminInboundsLoading = false;
   state.createAdminInboundsError = "";
   state.createAdminInboundIds = [];
+  state.createAdminInboundProtocolOpen = "";
   state.editAdminInbounds = [];
   state.editAdminInboundsLoading = false;
   state.editAdminInboundsError = "";
   state.editAdminInboundIds = [];
+  state.editAdminInboundProtocolOpen = "";
   state.editAdminLimitGb = "";
   state.editAdminRemainingGb = "";
   state.editAdminValidUntilDate = "";
+  state.createAdminValidUntilDate = "";
   state.editAdminActive = true;
   state.editAdminDeleteReturnTraffic = true;
   state.editAdminUpdateReturnTraffic = true;
@@ -897,6 +910,11 @@ function showAdminForm() {
   state.createAdminInboundsLoading = Boolean(state.createAdminPanelId && panelSupportsInboundLoading(state.data?.panels?.find((panel) => panel.id === state.createAdminPanelId)));
   state.createAdminInboundsError = "";
   state.createAdminInboundIds = [];
+  state.createAdminInboundProtocolOpen = "";
+  state.createAdminValidUntilDate = "";
+  state.createAdminValidUntilPickerOpen = false;
+  state.createAdminValidUntilMonth = "";
+  state.createAdminValidUntilPlacement = "down";
   modal("New reseller", createAdminModalBody());
   if (state.createAdminPanelId) {
     void loadCreateAdminInbounds(state.createAdminPanelId, { silent: true });
@@ -925,6 +943,11 @@ function showEditAdminForm(id) {
   state.editAdminInbounds = [];
   state.editAdminInboundsLoading = Boolean(admin.panelId && panelSupportsInboundLoading(state.data?.panels?.find((panel) => panel.id === admin.panelId)));
   state.editAdminInboundsError = "";
+  state.editAdminInboundsWarning = "";
+  state.editAdminInboundProtocolOpen = "";
+  state.editAdminValidUntilPickerOpen = false;
+  state.editAdminValidUntilMonth = "";
+  state.editAdminValidUntilPlacement = "down";
   state.editAdminActive = admin.active !== false;
   state.editAdminDeleteReturnTraffic = admin.deleteReturnTraffic !== false;
   state.editAdminUpdateReturnTraffic = admin.updateReturnTraffic !== false;
@@ -940,20 +963,46 @@ function createAdminModalBody() {
   const panelOptions = panels.map((panel) => `<option value="${panel.id}"${panel.id === state.createAdminPanelId ? " selected" : ""}>${esc(panel.name)}</option>`).join("");
   const panel = panels.find((item) => item.id === state.createAdminPanelId);
   return `
-    <form class="form edit-panel-form edit-admin-form" onsubmit="window.Aegis.createAdmin(event)">
+    <form class="form edit-panel-form edit-admin-form reseller-modal" onsubmit="window.Aegis.createAdmin(event)">
       <div class="edit-panel-main">
         <label>Username<input name="username" required placeholder="reseller-01" /></label>
         <label>Password<input name="password" required type="password" placeholder="Strong password" /></label>
         <label>Role<select name="role"><option value="admin">Reseller</option><option value="superadmin">SuperAdmin</option></select></label>
         <label>Panel<select name="panelId" onchange="window.Aegis.loadCreateAdminInbounds(this.value)"><option value="">No fixed panel</option>${panelOptions}</select></label>
         <label>Traffic limit (GB)<input name="trafficGb" type="number" min="0" step="1" placeholder="100" /></label>
-        <label>Valid until<input name="validUntilDate" type="date" /></label>
+        <div id="create-admin-valid-until-field">${renderAdminCompactDateField({
+          label: "Valid until",
+          value: state.createAdminValidUntilDate,
+          field: "create",
+          valueName: "validUntilDate"
+        })}</div>
       </div>
       <div class="edit-panel-side">
         <div id="create-admin-inbounds-field">${createAdminInboundsField(panel)}</div>
       </div>
       <div class="edit-panel-footer">
-        <div class="check-row"><label><input name="deleteReturnTraffic" type="checkbox" checked /> Return traffic on delete</label><label><input name="updateReturnTraffic" type="checkbox" checked /> Return traffic on update</label></div>
+        <div class="check-row reseller-switch-row">
+          <label class="switch-field reseller-return-switch">
+            <span>
+              <strong>Return traffic on delete</strong>
+              <small>Traffic returns when a reseller deletes the user</small>
+            </span>
+            <span class="switch-control">
+              <input name="deleteReturnTraffic" type="checkbox" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
+          <label class="switch-field reseller-return-switch">
+            <span>
+              <strong>Return traffic on update</strong>
+              <small>Traffic returns when the quota is reduced</small>
+            </span>
+            <span class="switch-control">
+              <input name="updateReturnTraffic" type="checkbox" checked />
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
+        </div>
         <button class="primary" type="submit">Create reseller</button>
       </div>
     </form>
@@ -971,17 +1020,21 @@ function editAdminInboundsField() {
   if (state.editAdminInboundsError) {
     return `<p class="alert danger">${esc(state.editAdminInboundsError)}</p>`;
   }
-  return renderMarzbanInboundPicker({
+  const warning = state.editAdminInboundsWarning ? `<p class="muted reseller-inbound-warning">${esc(state.editAdminInboundsWarning)}</p>` : "";
+  return `${warning}${renderAdminInboundProtocolPicker({
     title: "Allowed inbounds",
     inbounds: state.editAdminInbounds,
     selectedIds: state.editAdminInboundIds,
     loading: false,
     error: "",
     emptyMessage: "This panel has no selectable inbounds yet.",
-    toggleAction: "toggleEditAdminInboundSelection",
+    openProtocol: state.editAdminInboundProtocolOpen,
+    toggleOpenAction: "toggleEditAdminInboundProtocol",
+    toggleSelectionAction: "toggleEditAdminInboundSelection",
     selectAllAction: "selectAllEditAdminInbounds",
-    clearAction: "clearEditAdminInbounds"
-  });
+    clearAction: "clearEditAdminInbounds",
+    className: "reseller-modal"
+  })}`;
 }
 
 function createAdminInboundsField(panel = state.data?.panels?.find((item) => item.id === state.createAdminPanelId)) {
@@ -994,23 +1047,26 @@ function createAdminInboundsField(panel = state.data?.panels?.find((item) => ite
   if (state.createAdminInboundsError) {
     return `<p class="alert danger">${esc(state.createAdminInboundsError)}</p>`;
   }
-  return renderMarzbanInboundPicker({
+  return renderAdminInboundProtocolPicker({
     title: "Allowed inbounds",
     inbounds: state.createAdminInbounds,
     selectedIds: state.createAdminInboundIds,
     loading: false,
     error: "",
     emptyMessage: "This panel has no selectable inbounds yet.",
-    toggleAction: "toggleCreateAdminInboundSelection",
+    openProtocol: state.createAdminInboundProtocolOpen,
+    toggleOpenAction: "toggleCreateAdminInboundProtocol",
+    toggleSelectionAction: "toggleCreateAdminInboundSelection",
     selectAllAction: "selectAllCreateAdminInbounds",
-    clearAction: "clearCreateAdminInbounds"
+    clearAction: "clearCreateAdminInbounds",
+    className: "reseller-modal"
   });
 }
 
 function editAdminModalBody() {
   const panelOptions = (state.data?.panels || []).map((panel) => `<option value="${panel.id}"${panel.id === state.editAdminPanelId ? " selected" : ""}>${esc(panel.name)}</option>`).join("");
   return `
-    <form class="form edit-panel-form edit-admin-form" onsubmit="window.Aegis.saveAdmin(event)">
+    <form class="form edit-panel-form edit-admin-form reseller-modal" onsubmit="window.Aegis.saveAdmin(event)">
       <div class="edit-panel-main">
         <label>Username<input name="username" readonly value="${esc(state.editAdminUsername)}" /></label>
         <label>Assigned Panel<select name="panelId" onchange="window.Aegis.loadEditAdminInbounds(this.value)"><option value=""${state.editAdminPanelId ? "" : " selected"}>No fixed panel</option>${panelOptions}</select></label>
@@ -1028,11 +1084,16 @@ function editAdminModalBody() {
             <span>GB</span>
           </div>
         </label>
-        <label>Valid until<input name="validUntilDate" type="date" value="${esc(state.editAdminValidUntilDate)}" /></label>
+        <div id="edit-admin-valid-until-field">${renderAdminCompactDateField({
+          label: "Valid until",
+          value: state.editAdminValidUntilDate,
+          field: "edit",
+          valueName: "validUntilDate"
+        })}</div>
       </div>
       <div class="edit-panel-side">
         <div id="edit-admin-inbounds-field">${editAdminInboundsField()}</div>
-        <label class="switch-field">
+        <label class="switch-field reseller-status-switch">
           <span>
             <strong>Status</strong>
             <small>${state.editAdminActive ? "Reseller is active" : "Reseller is disabled"}</small>
@@ -1042,7 +1103,7 @@ function editAdminModalBody() {
             <span class="switch-track" aria-hidden="true"></span>
           </span>
         </label>
-        <label class="switch-field">
+        <label class="switch-field reseller-return-switch">
           <span>
             <strong>Return traffic on delete</strong>
             <small>${state.editAdminDeleteReturnTraffic ? "Traffic is returned on delete" : "Traffic is not returned on delete"}</small>
@@ -1052,7 +1113,7 @@ function editAdminModalBody() {
             <span class="switch-track" aria-hidden="true"></span>
           </span>
         </label>
-        <label class="switch-field">
+        <label class="switch-field reseller-return-switch">
           <span>
             <strong>Return traffic on update</strong>
             <small>${state.editAdminUpdateReturnTraffic ? "Traffic is returned on update" : "Traffic is not returned on update"}</small>
@@ -1320,7 +1381,7 @@ function normalizeDateInputValue(value) {
   return `${year}-${month}-${day}`;
 }
 
-function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, error, emptyMessage, toggleAction, selectAllAction, clearAction }) {
+function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, error, emptyMessage, toggleAction, selectAllAction, clearAction, className = "" }) {
   if (loading) {
     return `<p class="muted">Loading inbounds...</p>`;
   }
@@ -1332,10 +1393,10 @@ function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, err
   }
   const grouped = groupMarzbanInbounds(inbounds);
   return `
-    <div class="inbound-picker">
+    <div class="inbound-picker${className ? ` ${className}` : ""}">
       <div class="card-head compact-head">
         <h4>${esc(title)}</h4>
-        <div class="actions">
+        <div class="actions inbound-picker-actions">
           <button type="button" class="ghost" onclick="window.Aegis.${selectAllAction}()">Select all</button>
           <button type="button" class="ghost" onclick="window.Aegis.${clearAction}()">Clear</button>
         </div>
@@ -1492,6 +1553,7 @@ async function loadCreateAdminInbounds(panelId, { silent = false } = {}) {
     state.createAdminInboundsError = "Select a panel to load inbounds.";
     state.createAdminInboundsLoading = false;
     state.createAdminInboundIds = [];
+    state.createAdminInboundProtocolOpen = "";
     refreshCreateAdminInboundsField();
     return;
   }
@@ -1500,6 +1562,7 @@ async function loadCreateAdminInbounds(panelId, { silent = false } = {}) {
     state.createAdminInboundsError = "";
     state.createAdminInboundsLoading = false;
     state.createAdminInboundIds = [];
+    state.createAdminInboundProtocolOpen = "";
     refreshCreateAdminInboundsField();
     return;
   }
@@ -1507,6 +1570,7 @@ async function loadCreateAdminInbounds(panelId, { silent = false } = {}) {
   state.createAdminInboundsError = "";
   state.createAdminInbounds = [];
   state.createAdminInboundIds = [];
+  state.createAdminInboundProtocolOpen = "";
   refreshCreateAdminInboundsField();
   try {
     const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
@@ -1531,6 +1595,8 @@ async function loadEditAdminInbounds(panelId, adminId, { silent = false } = {}) 
     state.editAdminInboundsError = "Select a panel to load inbounds.";
     state.editAdminInboundsLoading = false;
     state.editAdminInboundIds = [];
+    state.editAdminInboundProtocolOpen = "";
+    state.editAdminInboundsWarning = "";
     refreshEditAdminInboundsField();
     refreshEditAdminError();
     return;
@@ -1540,13 +1606,17 @@ async function loadEditAdminInbounds(panelId, adminId, { silent = false } = {}) 
     state.editAdminInboundsError = "";
     state.editAdminInboundsLoading = false;
     state.editAdminInboundIds = [];
+    state.editAdminInboundProtocolOpen = "";
+    state.editAdminInboundsWarning = "";
     refreshEditAdminInboundsField();
     refreshEditAdminError();
     return;
   }
   state.editAdminInboundsLoading = true;
   state.editAdminInboundsError = "";
+  state.editAdminInboundsWarning = "";
   state.editAdminInbounds = [];
+  state.editAdminInboundProtocolOpen = "";
   if (!silent) refreshEditAdminInboundsField();
   refreshEditAdminError();
   try {
@@ -1560,14 +1630,15 @@ async function loadEditAdminInbounds(panelId, adminId, { silent = false } = {}) 
     } else if (selected.length) {
       state.editAdminInboundsError = "";
     } else if (existing.length) {
-      state.editAdminInboundsError = "Saved allowed inbounds are no longer available on this panel.";
+      state.editAdminInboundsWarning = "Saved allowed inbounds are no longer available on this panel.";
     } else {
-      state.editAdminInboundsError = "Select allowed inbounds for this reseller.";
+      state.editAdminInboundsWarning = "Select allowed inbounds for this reseller.";
     }
   } catch (error) {
     state.editAdminInbounds = [];
     state.editAdminInboundIds = [];
     state.editAdminInboundsError = error.message || "Failed to load inbounds";
+    state.editAdminInboundsWarning = "";
   } finally {
     state.editAdminInboundsLoading = false;
     refreshEditAdminInboundsField();
@@ -1584,14 +1655,28 @@ function toggleCreateAdminInboundSelection(id, checked) {
   refreshCreateAdminInboundsField();
 }
 
-function selectAllCreateAdminInbounds() {
-  state.createAdminInboundIds = normalMarzbanInboundIds(state.createAdminInbounds);
+function createAdminInboundIdsForProtocol(protocol) {
+  if (!protocol) return normalMarzbanInboundIds(state.createAdminInbounds);
+  return state.createAdminInbounds.filter((inbound) => String(inbound.protocol || "other").toLowerCase() === String(protocol).toLowerCase()).map((inbound) => inbound.id);
+}
+
+function selectAllCreateAdminInbounds(protocol = "") {
+  const selected = new Set(state.createAdminInboundIds);
+  for (const id of createAdminInboundIdsForProtocol(protocol)) {
+    selected.add(id);
+  }
+  state.createAdminInboundIds = [...selected];
   state.createAdminInboundsError = "";
   refreshCreateAdminInboundsField();
 }
 
-function clearCreateAdminInbounds() {
-  state.createAdminInboundIds = [];
+function clearCreateAdminInbounds(protocol = "") {
+  if (!protocol) {
+    state.createAdminInboundIds = [];
+  } else {
+    const removed = new Set(createAdminInboundIdsForProtocol(protocol));
+    state.createAdminInboundIds = state.createAdminInboundIds.filter((id) => !removed.has(id));
+  }
   state.createAdminInboundsError = "";
   refreshCreateAdminInboundsField();
 }
@@ -1605,15 +1690,97 @@ function toggleEditAdminInboundSelection(id, checked) {
   refreshEditAdminInboundsField();
 }
 
-function selectAllEditAdminInbounds() {
-  state.editAdminInboundIds = normalMarzbanInboundIds(state.editAdminInbounds);
+function editAdminInboundIdsForProtocol(protocol) {
+  if (!protocol) return normalMarzbanInboundIds(state.editAdminInbounds);
+  return state.editAdminInbounds.filter((inbound) => String(inbound.protocol || "other").toLowerCase() === String(protocol).toLowerCase()).map((inbound) => inbound.id);
+}
+
+function selectAllEditAdminInbounds(protocol = "") {
+  const selected = new Set(state.editAdminInboundIds);
+  for (const id of editAdminInboundIdsForProtocol(protocol)) {
+    selected.add(id);
+  }
+  state.editAdminInboundIds = [...selected];
   state.editAdminInboundsError = "";
   refreshEditAdminInboundsField();
 }
 
-function clearEditAdminInbounds() {
-  state.editAdminInboundIds = [];
+function clearEditAdminInbounds(protocol = "") {
+  if (!protocol) {
+    state.editAdminInboundIds = [];
+  } else {
+    const removed = new Set(editAdminInboundIdsForProtocol(protocol));
+    state.editAdminInboundIds = state.editAdminInboundIds.filter((id) => !removed.has(id));
+  }
   state.editAdminInboundsError = "";
+  refreshEditAdminInboundsField();
+}
+
+function setCreateAdminValidUntilDate(value) {
+  state.createAdminValidUntilDate = value;
+  state.createAdminValidUntilPickerOpen = false;
+  if (value) state.createAdminValidUntilMonth = value.slice(0, 7);
+  refreshCreateAdminValidUntilField();
+}
+
+function clearCreateAdminValidUntil(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  state.createAdminValidUntilDate = "";
+  state.createAdminValidUntilPickerOpen = false;
+  refreshCreateAdminValidUntilField();
+}
+
+function openCreateAdminValidUntilPicker(event) {
+  if (event?.target?.closest?.(".reseller-date-clear")) return;
+  state.createAdminValidUntilPickerOpen = !state.createAdminValidUntilPickerOpen;
+  state.createAdminValidUntilMonth = state.createAdminValidUntilDate ? state.createAdminValidUntilDate.slice(0, 7) : (state.createAdminValidUntilMonth || todayDateInputValue().slice(0, 7));
+  const shell = event?.currentTarget?.closest?.(".reseller-date-shell");
+  if (shell?.getBoundingClientRect) {
+    const rect = shell.getBoundingClientRect();
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom);
+    const spaceAbove = Math.max(0, rect.top);
+    state.createAdminValidUntilPlacement = spaceBelow < 320 && spaceAbove > spaceBelow ? "up" : "down";
+  }
+  refreshCreateAdminValidUntilField();
+}
+
+function setEditAdminValidUntilDate(value) {
+  state.editAdminValidUntilDate = value;
+  state.editAdminValidUntilPickerOpen = false;
+  if (value) state.editAdminValidUntilMonth = value.slice(0, 7);
+  refreshEditAdminValidUntilField();
+}
+
+function clearEditAdminValidUntil(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  state.editAdminValidUntilDate = "";
+  state.editAdminValidUntilPickerOpen = false;
+  refreshEditAdminValidUntilField();
+}
+
+function openEditAdminValidUntilPicker(event) {
+  if (event?.target?.closest?.(".reseller-date-clear")) return;
+  state.editAdminValidUntilPickerOpen = !state.editAdminValidUntilPickerOpen;
+  state.editAdminValidUntilMonth = state.editAdminValidUntilDate ? state.editAdminValidUntilDate.slice(0, 7) : (state.editAdminValidUntilMonth || todayDateInputValue().slice(0, 7));
+  const shell = event?.currentTarget?.closest?.(".reseller-date-shell");
+  if (shell?.getBoundingClientRect) {
+    const rect = shell.getBoundingClientRect();
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom);
+    const spaceAbove = Math.max(0, rect.top);
+    state.editAdminValidUntilPlacement = spaceBelow < 320 && spaceAbove > spaceBelow ? "up" : "down";
+  }
+  refreshEditAdminValidUntilField();
+}
+
+function toggleCreateAdminInboundProtocol(protocol) {
+  state.createAdminInboundProtocolOpen = state.createAdminInboundProtocolOpen === protocol ? "" : protocol;
+  refreshCreateAdminInboundsField();
+}
+
+function toggleEditAdminInboundProtocol(protocol) {
+  state.editAdminInboundProtocolOpen = state.editAdminInboundProtocolOpen === protocol ? "" : protocol;
   refreshEditAdminInboundsField();
 }
 
@@ -1626,6 +1793,20 @@ function refreshCreateAdminInboundsField() {
   field.innerHTML = createAdminInboundsField();
 }
 
+function refreshCreateAdminValidUntilField() {
+  const field = document.querySelector("#create-admin-valid-until-field");
+  if (!field) {
+    setModal("New reseller", createAdminModalBody());
+    return;
+  }
+  field.innerHTML = renderAdminCompactDateField({
+    label: "Valid until",
+    value: state.createAdminValidUntilDate,
+    field: "create",
+    valueName: "validUntilDate"
+  });
+}
+
 function refreshEditAdminInboundsField() {
   const field = document.querySelector("#edit-admin-inbounds-field");
   if (!field) {
@@ -1633,6 +1814,28 @@ function refreshEditAdminInboundsField() {
     return;
   }
   field.innerHTML = editAdminInboundsField();
+}
+
+function refreshEditAdminValidUntilField() {
+  const field = document.querySelector("#edit-admin-valid-until-field");
+  if (!field) {
+    setModal("Edit reseller", editAdminModalBody());
+    return;
+  }
+  field.innerHTML = renderAdminCompactDateField({
+    label: "Valid until",
+    value: state.editAdminValidUntilDate,
+    field: "edit",
+    valueName: "validUntilDate"
+  });
+}
+
+function refreshAdminValidUntilField(field) {
+  if (field === "create") {
+    refreshCreateAdminValidUntilField();
+  } else {
+    refreshEditAdminValidUntilField();
+  }
 }
 
 function createUserExpiryField() {
@@ -1656,15 +1859,15 @@ function editUserExpiryField() {
   });
 }
 
-function renderExpiryField({ value, openAction, changeAction, clearAction, valueName, showRelative = false }) {
+function renderExpiryField({ value, openAction, changeAction, clearAction, valueName, showRelative = false, label = "Expiry Date", className = "", ariaLabel = "Select expiry date" }) {
   const currentValue = value || "";
   const relativeText = showRelative ? relativeExpiryText(currentValue) : "";
   const minValue = todayDateInputValue();
   return `
-    <div class="expiry-picker">
-      <label>Expiry Date</label>
+    <div class="expiry-picker${className ? ` ${className}` : ""}">
+      <label>${esc(label)}</label>
       <div class="expiry-shell${currentValue ? " has-value" : ""}">
-        <button type="button" class="expiry-display" onclick="window.Aegis.${openAction}(event)" aria-label="Select expiry date">
+        <button type="button" class="expiry-display" onclick="window.Aegis.${openAction}(event)" aria-label="${esc(ariaLabel)}">
           <span class="expiry-display-value">${esc(currentValue)}</span>
           <span class="expiry-display-icon" aria-hidden="true">${calendarIcon()}</span>
         </button>
@@ -1672,6 +1875,250 @@ function renderExpiryField({ value, openAction, changeAction, clearAction, value
         ${currentValue ? `<button type="button" class="expiry-clear" onclick="window.Aegis.${clearAction}(event)" aria-label="Clear expiry date">×</button>` : ""}
       </div>
       ${relativeText ? `<small class="expiry-relative">${esc(relativeText)}</small>` : ""}
+    </div>
+  `;
+}
+
+function adminValidUntilMonthValue(field) {
+  const current = field === "create" ? state.createAdminValidUntilMonth : state.editAdminValidUntilMonth;
+  if (current) return current;
+  const value = field === "create" ? state.createAdminValidUntilDate : state.editAdminValidUntilDate;
+  return value ? value.slice(0, 7) : todayDateInputValue().slice(0, 7);
+}
+
+function adminValidUntilOpen(field) {
+  return field === "create" ? state.createAdminValidUntilPickerOpen : state.editAdminValidUntilPickerOpen;
+}
+
+function formatResellerDateLabel(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function shiftAdminValidUntilMonth(field, delta) {
+  const current = adminValidUntilMonthValue(field);
+  const date = new Date(`${current}-01T12:00:00`);
+  if (Number.isNaN(date.getTime())) return;
+  date.setMonth(date.getMonth() + delta);
+  const next = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+  if (field === "create") {
+    state.createAdminValidUntilMonth = next;
+  } else {
+    state.editAdminValidUntilMonth = next;
+  }
+  refreshAdminValidUntilField(field);
+}
+
+function setAdminValidUntilToday(field) {
+  const today = todayDateInputValue();
+  if (field === "create") {
+    state.createAdminValidUntilDate = today;
+    state.createAdminValidUntilPickerOpen = false;
+    state.createAdminValidUntilMonth = today.slice(0, 7);
+  } else {
+    state.editAdminValidUntilDate = today;
+    state.editAdminValidUntilPickerOpen = false;
+    state.editAdminValidUntilMonth = today.slice(0, 7);
+  }
+  refreshAdminValidUntilField(field);
+}
+
+function selectAdminValidUntilDay(field, value) {
+  if (field === "create") {
+    state.createAdminValidUntilDate = value;
+    state.createAdminValidUntilPickerOpen = false;
+    state.createAdminValidUntilMonth = value.slice(0, 7);
+  } else {
+    state.editAdminValidUntilDate = value;
+    state.editAdminValidUntilPickerOpen = false;
+    state.editAdminValidUntilMonth = value.slice(0, 7);
+  }
+  refreshAdminValidUntilField(field);
+}
+
+function clearAdminValidUntil(field, event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  if (field === "create") {
+    state.createAdminValidUntilDate = "";
+    state.createAdminValidUntilPickerOpen = false;
+  } else {
+    state.editAdminValidUntilDate = "";
+    state.editAdminValidUntilPickerOpen = false;
+  }
+  refreshAdminValidUntilField(field);
+}
+
+function openAdminValidUntilPicker(field, event) {
+  if (event?.target?.closest?.(".reseller-date-clear")) return;
+  const isCreate = field === "create";
+  const openKey = isCreate ? "createAdminValidUntilPickerOpen" : "editAdminValidUntilPickerOpen";
+  const monthKey = isCreate ? "createAdminValidUntilMonth" : "editAdminValidUntilMonth";
+  const value = isCreate ? state.createAdminValidUntilDate : state.editAdminValidUntilDate;
+  state[openKey] = !state[openKey];
+  state[monthKey] = value ? value.slice(0, 7) : (state[monthKey] || todayDateInputValue().slice(0, 7));
+  refreshAdminValidUntilField(field);
+}
+
+function renderAdminDatePopover(field, monthValue, currentValue) {
+  const monthDate = new Date(`${monthValue}-01T12:00:00`);
+  if (Number.isNaN(monthDate.getTime())) return "";
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  const today = todayDateInputValue();
+  const cells = [];
+  for (let i = 0; i < firstDay; i += 1) {
+    cells.push(`<span class="reseller-date-day empty" aria-hidden="true"></span>`);
+  }
+  for (let day = 1; day <= days; day += 1) {
+    const value = `${year}-${pad2(month + 1)}-${pad2(day)}`;
+    const selected = value === currentValue;
+    const isToday = value === today;
+    const isPast = value < today;
+    cells.push(isPast ? `
+      <span class="reseller-date-day disabled${selected ? " selected" : ""}${isToday ? " today" : ""}" aria-hidden="true"><span>${day}</span></span>
+    ` : `
+      <button type="button" class="reseller-date-day${selected ? " selected" : ""}${isToday ? " today" : ""}" onclick="window.Aegis.selectAdminValidUntilDay('${field}', '${value}')" aria-label="${esc(`${value}${selected ? " selected" : ""}`)}">
+        <span>${day}</span>
+      </button>
+    `);
+  }
+  const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const placement = field === "create" ? state.createAdminValidUntilPlacement : state.editAdminValidUntilPlacement;
+  return `
+    <div class="reseller-date-popover ${placement === "up" ? "open-up" : "open-down"}" role="dialog" aria-label="Select ${esc(field === "create" ? "new reseller validity date" : "reseller validity date")}">
+      <div class="reseller-date-popover-head">
+        <button type="button" class="ghost reseller-date-nav" onclick="window.Aegis.shiftAdminValidUntilMonth('${field}', -1)" aria-label="Previous month">‹</button>
+        <strong>${esc(monthLabel)}</strong>
+        <button type="button" class="ghost reseller-date-nav" onclick="window.Aegis.shiftAdminValidUntilMonth('${field}', 1)" aria-label="Next month">›</button>
+      </div>
+      <div class="reseller-date-calendar">
+        <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+        ${cells.join("")}
+      </div>
+      <div class="reseller-date-actions">
+        <button type="button" class="ghost reseller-date-mini" onclick="window.Aegis.setAdminValidUntilToday('${field}')">Today</button>
+        ${currentValue ? `<button type="button" class="ghost reseller-date-mini" onclick="window.Aegis.clearAdminValidUntil('${field}', event)">Clear</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminCompactDateField({ value, field, valueName, label, className = "" }) {
+  const currentValue = value || "";
+  const open = adminValidUntilOpen(field);
+  const monthValue = adminValidUntilMonthValue(field);
+  return `
+    <div class="reseller-date-field${className ? ` ${className}` : ""}">
+      <label>${esc(label)}</label>
+      <div class="reseller-date-shell${currentValue ? " has-value" : ""}${open ? " open" : ""}">
+        <input class="reseller-date-native" name="${esc(valueName)}" type="hidden" value="${esc(currentValue)}" />
+        <button type="button" class="reseller-date-display" onclick="window.Aegis.openAdminValidUntilPicker('${field}', event)" aria-label="Select ${esc(label.toLowerCase())}" aria-expanded="${open ? "true" : "false"}">
+          <span class="reseller-date-display-value">${currentValue ? esc(formatResellerDateLabel(currentValue)) : ""}</span>
+          <span class="reseller-date-icon" aria-hidden="true">${calendarIcon()}</span>
+        </button>
+        ${currentValue ? `<button type="button" class="reseller-date-clear" onclick="window.Aegis.clearAdminValidUntil('${field}', event)" aria-label="Clear ${esc(label.toLowerCase())}">×</button>` : ""}
+        ${open ? renderAdminDatePopover(field, monthValue, currentValue) : ""}
+      </div>
+    </div>
+  `;
+}
+
+function protocolSelectionSummary(protocolInbounds, selectedIds) {
+  const total = protocolInbounds.length;
+  const selected = protocolInbounds.filter((inbound) => selectedIds.includes(inbound.id)).length;
+  return `${selected}/${total} selected`;
+}
+
+function renderAdminInboundProtocolCard(protocol, protocolInbounds, selectedIds, openProtocol, toggleOpenAction, toggleSelectionAction, selectAllAction, clearAction) {
+  const total = protocolInbounds.length;
+  const selected = protocolInbounds.filter((inbound) => selectedIds.includes(inbound.id)).length;
+  const label = String(protocol || "other").toUpperCase();
+  const open = openProtocol === protocol;
+  return `
+    <div class="reseller-protocol-group">
+      <div
+        class="protocol-card reseller-protocol-card${open ? " open" : ""}${total ? "" : " disabled"}"
+        role="button"
+        tabindex="0"
+        aria-expanded="${open ? "true" : "false"}"
+        aria-label="${esc(open ? `Close ${label} configs` : `Configure ${label} configs`)}"
+        onclick="window.Aegis.${toggleOpenAction}('${esc(protocol)}')"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.Aegis.${toggleOpenAction}('${esc(protocol)}')}"
+      >
+        <div class="protocol-card-body">
+          <strong>${esc(label)}</strong>
+          <small>${esc(protocolSelectionSummary(protocolInbounds, selectedIds))}</small>
+          <span>${esc(total ? "Click Configure" : "No configs available")}</span>
+        </div>
+        <button
+          type="button"
+          class="protocol-card-menu"
+          ${total ? "" : "disabled"}
+          aria-label="${esc(open ? `Close ${label} configs` : `Configure ${label} configs`)}"
+          aria-expanded="${open ? "true" : "false"}"
+          onclick="event.stopPropagation(); window.Aegis.${toggleOpenAction}('${esc(protocol)}')"
+        >⋮</button>
+      </div>
+      ${open ? `
+        <div class="reseller-config-panel">
+          <div class="card-head compact-head">
+            <div>
+              <h4>${esc(label)} configs</h4>
+              <small class="muted">${esc(protocolSelectionSummary(protocolInbounds, selectedIds))}</small>
+            </div>
+            <div class="actions reseller-inbound-actions">
+              <button type="button" class="ghost" onclick="window.Aegis.${selectAllAction}('${esc(protocol)}')">Select all</button>
+              <button type="button" class="ghost" onclick="window.Aegis.${clearAction}('${esc(protocol)}')">Clear</button>
+            </div>
+          </div>
+          ${protocolInbounds.length ? `
+            <div class="protocol-checklist reseller-config-checklist">
+              ${protocolInbounds.map((inbound) => `
+                <label class="protocol-option ${selectedIds.includes(inbound.id) ? "selected" : ""}">
+                  <input
+                    type="checkbox"
+                    value="${esc(inbound.id)}"
+                    ${selectedIds.includes(inbound.id) ? "checked" : ""}
+                    onchange="window.Aegis.${toggleSelectionAction}('${esc(protocol)}', this.value, this.checked)"
+                  />
+                  <span>
+                    <strong>${esc(inbound.label || inbound.id)}</strong>
+                    <small>${esc(formatInboundDetails(inbound))}</small>
+                  </span>
+                </label>
+              `).join("")}
+            </div>
+          ` : `<p class="muted">No configs available for this protocol.</p>`}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderAdminInboundProtocolPicker({ title, inbounds, selectedIds, loading, error, emptyMessage, openProtocol, toggleOpenAction, toggleSelectionAction, selectAllAction, clearAction, className = "" }) {
+  if (loading) {
+    return `<p class="muted">Loading inbounds...</p>`;
+  }
+  if (error) {
+    return `<p class="alert danger">${esc(error)}</p>`;
+  }
+  if (!inbounds.length) {
+    return `<p class="alert danger">${esc(emptyMessage)}</p>`;
+  }
+  const grouped = groupMarzbanInbounds(inbounds);
+  return `
+    <div class="reseller-inbound-picker${className ? ` ${className}` : ""}">
+      <div class="card-head compact-head reseller-inbound-head">
+        <h4>${esc(title)}</h4>
+      </div>
+      <div class="reseller-protocol-grid">
+        ${Object.entries(grouped).map(([protocol, protocolInbounds]) => renderAdminInboundProtocolCard(protocol, protocolInbounds, selectedIds, openProtocol, toggleOpenAction, toggleSelectionAction, selectAllAction, clearAction)).join("")}
+      </div>
     </div>
   `;
 }
@@ -2560,9 +3007,22 @@ window.Aegis = {
   toggleCreateAdminInboundSelection,
   selectAllCreateAdminInbounds,
   clearCreateAdminInbounds,
+  toggleCreateAdminInboundProtocol,
+  setCreateAdminValidUntilDate,
+  clearCreateAdminValidUntil,
+  openCreateAdminValidUntilPicker,
+  clearAdminValidUntil,
+  openAdminValidUntilPicker,
+  shiftAdminValidUntilMonth,
+  setAdminValidUntilToday,
   toggleEditAdminInboundSelection,
   selectAllEditAdminInbounds,
   clearEditAdminInbounds,
+  toggleEditAdminInboundProtocol,
+  setEditAdminValidUntilDate,
+  clearEditAdminValidUntil,
+  openEditAdminValidUntilPicker,
+  selectAdminValidUntilDay,
   createUser,
   saveEditUser,
   loadUserInbounds,

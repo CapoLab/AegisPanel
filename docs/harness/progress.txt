@@ -6,3 +6,12 @@ Current summary: 3x-ui/Sanaei username/password session login was fixed using li
 2026-06-12: AP-3X-UI-002 passed. Create-user inbound loading now uses adapter capabilities and works for three-x-ui while keeping Marzban behavior unchanged.
 2026-06-12: AP-RBAC-INBOUNDS-004 passed. SuperAdmin reseller allowed-inbounds editing now preserves stored selections and no longer auto-grants all loaded inbounds during edit.
 2026-06-12: AP-RBAC-INBOUNDS-004 frontend capability detection fixed. New reseller allowed inbounds now load from state.meta.panelTypes when panel capabilities are missing inline.
+2026-06-12: AP-RBAC-INBOUNDS-004 reseller modal polished. Allowed inbounds now render compactly with small inline actions and constrained scrolling.
+2026-06-12: AP-RBAC-INBOUNDS-004 reseller modal refined again. New/Edit Reseller now use compact protocol cards, a smaller inline date field, and a compact status switch without changing backend behavior.
+2026-06-12: AP-RBAC-INBOUNDS-004 reseller modal cleanup. Duplicate config-panel Select all/Clear actions removed and the reseller date/status controls were tightened further.
+2026-06-12: AP-RBAC-INBOUNDS-004 reseller modal polish. Protocol cards are now clickable, return-traffic controls use compact switches, and the reseller date field is tighter.
+2026-06-12: AP-RBAC-INBOUNDS-004 reseller date field refined. New/Edit Reseller now share a compact reseller-only date shell with hidden native input and compact switch controls.
+
+2026-06-12: Reseller modal picker fix completed. Edit Reseller now keeps the allowed-inbounds picker visible, and New/Edit Reseller use a compact custom Valid until popover.
+
+2026-06-12: Reseller modal unified. New/Edit Reseller now share the compact date popover and nested allowed-inbounds cards, with Edit Reseller keeping the picker visible when saved inbounds are missing.

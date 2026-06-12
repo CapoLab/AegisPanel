@@ -7518,7 +7518,33 @@ test("new reseller uses meta panel capabilities when inline capabilities are mis
   const createAdminSource = source.slice(source.indexOf("function showAdminForm()"), source.indexOf("function showEditAdminForm"));
   assert.match(createAdminSource, /state\.createAdminPanelId = state\.data\?\.panels\?\.\[0\]\?\.id \|\| "";/);
   assert.match(createAdminSource, /void loadCreateAdminInbounds\(state\.createAdminPanelId, \{ silent: true \}\);/);
-  assert.match(createAdminSource, /state\.createAdminInboundsLoading = Boolean\(state\.createAdminPanelId && panelSupportsInboundLoading/);
+  assert.match(source, /className: "reseller-modal"/);
+  assert.match(source, /renderAdminCompactDateField\(\{\s+label: "Valid until"/);
+  assert.match(source, /reseller-date-field\$\{className \? ` \$\{className\}` : ""\}/);
+  assert.match(source, /reseller-date-shell\$\{currentValue \? " has-value" : ""\}/);
+  assert.match(source, /class="reseller-date-display"/);
+  assert.match(source, /class="reseller-date-native" name="\$\{esc\(valueName\)\}" type="hidden"/);
+  assert.match(source, /class="reseller-date-clear"/);
+  assert.match(source, /class="reseller-date-icon"/);
+  assert.match(source, /placement === "up" \? "open-up" : "open-down"/);
+  assert.match(source, /class="reseller-date-calendar"/);
+  assert.match(source, /reseller-date-day\$\{selected \? " selected" : ""\}/);
+  assert.match(source, /reseller-date-day disabled/);
+  assert.match(source, /class="reseller-date-actions"/);
+  assert.match(source, /state\.editAdminInboundsWarning = "Select allowed inbounds for this reseller\."/);
+  assert.match(source, /state\.editAdminInboundsWarning = "Saved allowed inbounds are no longer available on this panel\."/);
+  assert.match(source, /renderAdminInboundProtocolPicker\(\{\s+title: "Allowed inbounds"/);
+  assert.match(source, /reseller-protocol-group/);
+  assert.match(source, /reseller-config-panel[\s\S]*Select all[\s\S]*Clear/);
+  assert.doesNotMatch(source, /reseller-inbound-head[\s\S]*Select all[\s\S]*Clear/);
+  assert.match(source, /reseller-inbound-warning/);
+  assert.match(source, /class="switch-field reseller-return-switch"/);
+  assert.match(source, /class="switch-field reseller-status-switch"/);
+  assert.match(source, /role="button"/);
+  assert.match(source, /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)\{/);
+  assert.match(source, /onclick="event\.stopPropagation\(\); window\.Aegis\.\$\{toggleOpenAction\}\('\$\{esc\(protocol\)\}'\)"/);
+  assert.doesNotMatch(source, /window\.Aegis\.\$\{selectAllAction\}\('\$\{esc\(openProtocol\)\}'\)/);
+  assert.doesNotMatch(source, /window\.Aegis\.\$\{clearAction\}\('\$\{esc\(openProtocol\)\}'\)/);
 });
 
 test("a superadmin cannot delete itself", async () => {
