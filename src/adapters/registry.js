@@ -1,4 +1,5 @@
 import { marzbanAdapter } from "./marzban.js";
+import { threeXUiAdapter } from "./three-x-ui.js";
 
 const supported = new Map();
 
@@ -69,8 +70,9 @@ function makeAdapter(type, label, capabilities) {
   };
 }
 
+supported.set("three-x-ui", threeXUiAdapter);
+
 [
-  ["three-x-ui", "3x-ui"],
   ["tx-ui", "Tx-ui"],
   ["guard", "Guard"],
   ["s-ui", "S-ui"]

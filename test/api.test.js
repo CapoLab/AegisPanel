@@ -7,6 +7,7 @@ import { readJson } from "../src/utils/http.js";
 import { hashPassword, verifyPassword, signSession, verifySession } from "../src/utils/security.js";
 import { supportedPanels, adapterFor } from "../src/adapters/registry.js";
 import { buildClient, marzbanAdapter } from "../src/adapters/marzban.js";
+import { buildClient as buildThreeXUiClient, threeXUiAdapter } from "../src/adapters/three-x-ui.js";
 
 async function withTempEnv(env, fn) {
   const keys = [
@@ -7440,6 +7441,20 @@ async function withMockFetch(responses, calls, fn) {
   }
 }
 
+function createFetchResponse(body, { status = 200, headers = {} } = {}) {
+  const text = typeof body === "string" ? body : body === undefined ? "" : JSON.stringify(body);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    text: async () => text,
+    json: async () => {
+      if (!text) return null;
+      return typeof body === "string" ? JSON.parse(text) : body;
+    }
+  };
+}
+
 test("password hashing verifies the original secret only", () => {
   const stored = hashPassword("safe-password");
   assert.equal(verifyPassword("safe-password", stored), true);
@@ -7466,6 +7481,17 @@ test("all planned panel adapters are registered", () => {
     assert.equal("token" in panel, false);
     assert.equal("credentials" in panel, false);
   }
+  assert.equal(adapterFor("three-x-ui").label, "3x-ui / Sanaei");
+  assert.deepEqual(adapterFor("three-x-ui").capabilities, {
+    canTestConnection: true,
+    canListInbounds: true,
+    canCreateUser: true,
+    canUpdateUser: true,
+    canDeleteUser: true,
+    canSyncTraffic: true,
+    canBuildSubscriptionUrl: true,
+    canGetUser: true
+  });
   assert.equal(adapterFor("marzban").label, "Marzban");
   assert.deepEqual(adapterFor("marzban").capabilities, {
     canTestConnection: true,
@@ -7477,6 +7503,348 @@ test("all planned panel adapters are registered", () => {
     canBuildSubscriptionUrl: true,
     canGetUser: true
   });
+});
+
+test("three-x-ui authenticates with bearer token or session cookie and normalizes inbounds", async () => {
+  assert.equal(
+    buildThreeXUiClient({
+      url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+      apiKey: "panel-token"
+    }).apiBase,
+    "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api"
+  );
+
+  const bearerCalls = [];
+  await withMockFetch(
+    [
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: [
+          {
+            id: 1,
+            remark: "VLESS 443",
+            protocol: "vless",
+            port: 443,
+            enable: true,
+            streamSettings: { network: "ws", security: "tls" }
+          },
+          {
+            id: 2,
+            tag: "VMess 80",
+            protocol: "vmess",
+            port: 80,
+            enabled: false,
+            network: "tcp",
+            tls: ""
+          }
+        ]
+      })
+    ],
+    bearerCalls,
+    async () => {
+      const inbounds = await threeXUiAdapter.listInbounds({
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+        apiKey: "panel-token"
+      });
+      assert.deepEqual(inbounds, [
+        {
+          id: "1",
+          label: "VLESS 443",
+          protocol: "vless",
+          network: "ws",
+          tls: "tls",
+          port: 443,
+          enabled: true
+        },
+        {
+          id: "2",
+          label: "VMess 80",
+          protocol: "vmess",
+          network: "tcp",
+          tls: "",
+          port: 80,
+          enabled: false
+        }
+      ]);
+      assert.equal(bearerCalls.length, 1);
+      assert.equal(bearerCalls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+      assert.equal(bearerCalls[0].options.headers.authorization, "Bearer panel-token");
+    }
+  );
+
+  const cookieCalls = [];
+  await withMockFetch(
+    [
+      createFetchResponse(
+        { success: true, msg: "ok" },
+        { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: [
+          {
+            id: 3,
+            remark: "Out",
+            protocol: "trojan",
+            port: 8443,
+            enable: true,
+            streamSettings: { network: "ws", security: "tls" }
+          }
+        ]
+      })
+    ],
+    cookieCalls,
+    async () => {
+      const inbounds = await threeXUiAdapter.listInbounds({
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+        username: "admin",
+        password: "secret"
+      });
+      assert.equal(cookieCalls.length, 2);
+      assert.equal(cookieCalls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+      assert.equal(cookieCalls[0].options.method, "POST");
+      assert.deepEqual(JSON.parse(cookieCalls[0].options.body), {
+        username: "admin",
+        password: "secret"
+      });
+      assert.equal(cookieCalls[1].options.headers.cookie, "_xui_session=session123");
+      assert.equal(inbounds[0].label, "Out");
+    }
+  );
+});
+
+test("three-x-ui buildSubscriptionUrl uses the configured panel prefix and path", async () => {
+  assert.equal(
+    await threeXUiAdapter.buildSubscriptionUrl(
+      {
+        subscriptionUrl: "https://prefix.example.com/",
+        subscriptionPath: "/subscription/"
+      },
+      { subId: "ticket-123" },
+      { username: "alice" }
+    ),
+    "https://prefix.example.com/subscription/ticket-123"
+  );
+  assert.equal(
+    await threeXUiAdapter.buildSubscriptionUrl(
+      {
+        subscriptionUrl: "vless://example@127.0.0.1:123",
+        subscriptionPath: "sub"
+      },
+      { subId: "ticket-123" },
+      { username: "alice" }
+    ),
+    null
+  );
+});
+
+test("three-x-ui createUser sends the verified payload and builds a subscription URL", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: {
+          client: {
+            id: 94,
+            email: "alice",
+            subId: "ticket-123",
+            enable: true
+          },
+          inboundIds: [1, 2]
+        }
+      })
+    ],
+    calls,
+    async () => {
+      const result = await threeXUiAdapter.createUser(
+        {
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com/",
+          subscriptionPath: "sub",
+          apiKey: "panel-token"
+        },
+        {
+          username: "alice",
+          limitBytes: 4294967296,
+          expiresAt: "2030-01-02T03:04:05.000Z",
+          active: false,
+          note: "demo note",
+          flow: "xtls-rprx-vision",
+          inboundIds: [2, 1],
+          subscriptionId: "ticket-123"
+        }
+      );
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+      assert.equal(calls[0].options.method, "POST");
+      assert.equal(calls[0].options.headers.authorization, "Bearer panel-token");
+      const body = JSON.parse(calls[0].options.body);
+      assert.equal(body.client.email, "alice");
+      assert.equal(typeof body.client.uuid, "string");
+      assert.equal(body.client.subId, "ticket-123");
+      assert.equal(body.client.totalGB, 4294967296);
+      assert.equal(body.client.expiryTime, new Date("2030-01-02T03:04:05.000Z").getTime());
+      assert.equal(body.client.enable, false);
+      assert.equal(body.client.flow, "xtls-rprx-vision");
+      assert.equal(body.client.comment, "demo note");
+      assert.deepEqual(body.inboundIds, [2, 1]);
+      assert.equal(result.subscriptionId, "ticket-123");
+      assert.equal(result.subscriptionUrl, "https://prefix.example.com/sub/ticket-123");
+    }
+  );
+});
+
+test("three-x-ui updateUser sends the verified payload", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: {
+          client: {
+            id: 94,
+            email: "alice",
+            subId: "ticket-123",
+            enable: false
+          },
+          inboundIds: [2, 3]
+        }
+      })
+    ],
+    calls,
+    async () => {
+      const result = await threeXUiAdapter.updateUser(
+      {
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+        subscriptionUrl: "https://prefix.example.com/",
+        subscriptionPath: "subscription",
+        apiKey: "panel-token"
+        },
+        {
+          username: "alice",
+          subscriptionId: "ticket-123",
+          limitBytes: 1024,
+          expiresAt: "2030-01-02T03:04:05.000Z",
+          active: true,
+          note: "old note",
+          flow: "",
+          inboundIds: [1]
+        },
+        {
+          limitBytes: 2048,
+          expiresAt: "2030-02-03T04:05:06.000Z",
+          active: false,
+          note: "updated note",
+          flow: "xtls-rprx-vision",
+          inboundIds: [2, 3]
+        }
+      );
+      assert.equal(calls.length, 3);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/alice");
+      assert.equal(calls[0].options.method, "POST");
+      const body = JSON.parse(calls[0].options.body);
+      assert.equal(body.email, "alice");
+      assert.equal(body.subId, "ticket-123");
+      assert.equal(body.totalGB, 2048);
+      assert.equal(body.expiryTime, new Date("2030-02-03T04:05:06.000Z").getTime());
+      assert.equal(body.enable, false);
+      assert.equal(body.comment, "updated note");
+      assert.equal(body.flow, "xtls-rprx-vision");
+      assert.equal("inboundIds" in body, false);
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/alice/attach");
+      assert.deepEqual(JSON.parse(calls[1].options.body), { inboundIds: [2, 3] });
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/alice/detach");
+      assert.deepEqual(JSON.parse(calls[2].options.body), { inboundIds: [1] });
+      assert.equal(result.subscriptionUrl, "https://prefix.example.com/subscription/ticket-123");
+    }
+  );
+});
+
+test("three-x-ui syncUserTraffic maps traffic and ignores raw config links", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      createFetchResponse(
+        { success: true, msg: "ok" },
+        { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: {
+          client: {
+            id: 94,
+            email: "alice",
+            subId: "ticket-123",
+            enable: true
+          },
+          inboundIds: [1, 2],
+          links: ["vless://example@127.0.0.1:123?path=%2F"]
+        }
+      }),
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: {
+          up: 120,
+          down: 30
+        }
+      })
+    ],
+    calls,
+    async () => {
+      const result = await threeXUiAdapter.syncUserTraffic({
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+        subscriptionUrl: "https://prefix.example.com/",
+        username: "admin",
+        password: "secret"
+      }, {
+        username: "alice",
+        usedBytes: 999
+      });
+      assert.equal(calls.length, 3);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/alice");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/alice");
+      assert.equal(result.usedBytes, 150);
+      assert.equal(result.subscriptionId, "ticket-123");
+      assert.equal(result.subscriptionUrl, "https://prefix.example.com/sub/ticket-123");
+    }
+  );
+});
+
+test("three-x-ui deleteUser treats missing clients as success", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      createFetchResponse(
+        { success: true, msg: "ok" },
+        { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse("", { status: 404 })
+    ],
+    calls,
+    async () => {
+      const result = await threeXUiAdapter.deleteUser({
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+        username: "admin",
+        password: "secret"
+      }, {
+        username: "alice"
+      });
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/del/alice");
+      assert.equal(calls[1].options.method, "POST");
+      assert.equal(result.status, "missing");
+      assert.equal("token" in result, false);
+      assert.equal("password" in result, false);
+    }
+  );
 });
 
 test("skeleton adapters fail clearly on contract methods", async () => {
