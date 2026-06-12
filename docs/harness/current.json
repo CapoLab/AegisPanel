@@ -26,6 +26,26 @@
     ]
   },
   {
+    "id": "AP-RBAC-INBOUNDS-004",
+    "title": "SuperAdmin assigns reseller allowed inbounds",
+    "passes": true,
+    "acceptanceCriteria": [
+      "SuperAdmin New Reseller can load/select allowed inbounds after choosing a panel that supports canListInbounds",
+      "New Reseller may select all loaded inbounds by default",
+      "SuperAdmin Edit Reseller can view/update allowed inbounds",
+      "Edit Reseller never silently auto-grants all inbounds when stored allowed inboundIds are missing, invalid, or non-matching",
+      "selected allowed inbound IDs are stored on the reseller/admin record",
+      "Admin/Reseller GET /api/admin/panels/:id/inbounds only returns SuperAdmin-assigned allowed inbounds",
+      "Admin/Reseller create/edit user UI remains simple and exposes no arbitrary panel/inbound/flow technical controls",
+      "reseller API cannot override panelId",
+      "reseller API cannot create/update users outside SuperAdmin-assigned allowed inbounds",
+      "reseller with no allowed inbounds on a real adapter panel fails clearly before local user creation/quota consumption",
+      "Marzban behavior remains covered",
+      "three-x-ui/Sanaei behavior remains covered",
+      "npm test passes"
+    ]
+  },
+  {
     "id": "AP-3X-SAFETY-003",
     "title": "Run three-x-ui failure safety smoke test",
     "passes": false,

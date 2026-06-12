@@ -424,6 +424,18 @@ function selectedInboundIdsFromBody(body, fallback = []) {
   return Array.isArray(fallback) ? fallback.filter((value) => typeof value === "string" && value.trim()) : [];
 }
 
+function normalizeInboundIdList(values) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))];
+}
+
+function inboundIdsWithinAllowedList(selectedInboundIds, allowedInboundIds) {
+  const selected = normalizeInboundIdList(selectedInboundIds);
+  if (!selected.length) return true;
+  const allowed = new Set(normalizeInboundIdList(allowedInboundIds));
+  return selected.every((id) => allowed.has(id));
+}
+
 function normalizeIsoDateOrNull(value, key, { allowPast = false } = {}) {
   if (value == null || value === "") return null;
   const date = new Date(value);
@@ -560,13 +572,20 @@ export async function handleApi(req, res, route) {
     if (store.list("admins").some((admin) => admin.username === username)) {
       return sendJson(res, 409, { ok: false, error: "Username already exists" });
     }
+    const panelId = body.panelId || null;
+    const panel = panelId ? store.find("panels", panelId) : null;
+    const inboundIdsProvided = Object.prototype.hasOwnProperty.call(body, "inboundIds");
+    let inboundIds = inboundIdsProvided ? normalizeInboundIdList(body.inboundIds) : [];
+    if (panelId && !panel) {
+      return sendJson(res, 400, { ok: false, error: "Panel not found" });
+    }
     const admin = store.insert("admins", {
       username,
       passwordHash: hashPassword(password),
       role: body.role || "admin",
       active: body.active !== false,
-      panelId: body.panelId || null,
-      inboundIds: body.inboundIds || [],
+      panelId,
+      inboundIds,
       trafficLimitBytes: body.trafficLimitBytes ?? null,
       trafficRemainingBytes: body.trafficLimitBytes ?? null,
       updateReturnTraffic: body.updateReturnTraffic !== false,
@@ -614,6 +633,9 @@ export async function handleApi(req, res, route) {
         if (!panel) return sendJson(res, 400, { ok: false, error: "Panel not found" });
         patch.panelId = panel.id;
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "inboundIds")) {
+      patch.inboundIds = normalizeInboundIdList(body.inboundIds);
     }
     if (Object.prototype.hasOwnProperty.call(body, "active")) patch.active = body.active !== false;
     const limitProvided = Object.prototype.hasOwnProperty.call(body, "trafficLimitBytes");
@@ -818,7 +840,19 @@ export async function handleApi(req, res, route) {
     if (!adapterSupports(adapter, "canListInbounds", "listInbounds")) {
       return sendJson(res, 501, { ok: false, error: "Real inbounds are not available for this panel type yet" });
     }
-    return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
+    if (actor.role === "admin") {
+      const allowedInboundIds = new Set(normalizeInboundIdList(actor.inboundIds));
+      if (!allowedInboundIds.size) {
+        return sendJson(res, 200, { ok: true, data: [] });
+      }
+      const rows = await adapter.listInbounds(panel);
+      return sendJson(res, 200, {
+        ok: true,
+        data: rows.filter((row) => allowedInboundIds.has(row.id))
+      });
+    }
+    const rows = await adapter.listInbounds(panel);
+    return sendJson(res, 200, { ok: true, data: rows });
   }
 
   const syncPanel = match(pathname, "/api/panels/:id/sync");
@@ -867,10 +901,26 @@ export async function handleApi(req, res, route) {
     const canCreateUser = adapterSupports(adapter, "canCreateUser", "createUser");
     let resolvedInboundIds = selectedInboundIdsFromBody(body);
     let usingAdapterInboundDefaults = false;
-    if (canListInbounds && (actor.role === "admin" || resolvedInboundIds.length === 0)) {
+    if (actor.role === "admin") {
+      const allowedInboundIds = normalizeInboundIdList(actor.inboundIds);
+      if (canListInbounds) {
+        if (!allowedInboundIds.length) {
+          return sendJson(res, 400, { ok: false, error: "No allowed inbounds assigned to this reseller." });
+        }
+        if (resolvedInboundIds.length > 0 && !inboundIdsWithinAllowedList(resolvedInboundIds, allowedInboundIds)) {
+          return sendJson(res, 400, { ok: false, error: "Selected inbounds are outside the reseller allowed inbounds." });
+        }
+        if (resolvedInboundIds.length === 0) {
+          resolvedInboundIds = allowedInboundIds;
+          usingAdapterInboundDefaults = true;
+        }
+      } else if (resolvedInboundIds.length === 0) {
+        resolvedInboundIds = allowedInboundIds;
+      }
+    } else if (canListInbounds && resolvedInboundIds.length === 0) {
       const rows = await adapter.listInbounds(panel);
       const availableInboundIds = rows.map((row) => row.id).filter((value) => typeof value === "string" && value.trim());
-      if (resolvedInboundIds.length === 0 || actor.role === "admin") {
+      if (resolvedInboundIds.length === 0) {
         resolvedInboundIds = availableInboundIds;
         usingAdapterInboundDefaults = true;
       }

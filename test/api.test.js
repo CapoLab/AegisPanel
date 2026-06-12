@@ -934,6 +934,7 @@ test("reseller validity blocks invalid vpn account expiries before remote create
           password: "admin-pass",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002", "vmess:VMess TLS:10001"],
           trafficLimitBytes: 1000,
           validUntil: "2030-01-02T23:59:59.000Z"
         }
@@ -1037,6 +1038,7 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
           password: "admin-pass",
           role: "admin",
           panelId: marzbanPanel.id,
+          inboundIds: ["vless:WS TLS:10002", "vmess:VMess TLS:10001"],
           trafficLimitBytes: 1000,
           validUntil: "2030-01-02T23:59:59.000Z"
         }
@@ -1044,23 +1046,6 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
 
       await withMockFetch(
         [
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ],
-              vmess: [
-                { tag: "VMess TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
-              ]
-            })
-          },
           {
             ok: true,
             status: 200,
@@ -1107,7 +1092,7 @@ test("reseller validity allows vpn account expiry within limit and superadmin is
           });
         }
       );
-      assert.equal(calls.length, 6);
+      assert.equal(calls.length, 4);
 
       const superadmin = await callApi(handleApi, {
         method: "POST",
@@ -1634,6 +1619,7 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
           username: "marz-owner",
           password: "admin-pass",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002", "vmess:VMess TLS:10001"],
           trafficLimitBytes: 1000
         }
       });
@@ -1645,23 +1631,6 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
 
       await withMockFetch(
         [
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ],
-              vmess: [
-                { tag: "VMess TLS", protocol: "vmess", network: "ws", tls: "tls", port: 10001 }
-              ]
-            })
-          },
           {
             ok: true,
             status: 200,
@@ -1715,13 +1684,11 @@ test("marzban-backed user creation reserves quota and calls the remote create ap
     }
   );
 
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
-  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
-  assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
-  assert.equal(calls[3].url, "https://marzban.example.com/api/user");
-  assert.equal(calls[3].options.headers.authorization, "Bearer marzban-token");
-  const remoteCreateBody = JSON.parse(calls[3].options.body);
+  assert.equal(calls[1].url, "https://marzban.example.com/api/user");
+  assert.equal(calls[1].options.headers.authorization, "Bearer marzban-token");
+  const remoteCreateBody = JSON.parse(calls[1].options.body);
   assert.deepEqual(remoteCreateBody.inbounds, {
     vless: ["WS TLS"],
     vmess: ["VMess TLS"]
@@ -2165,6 +2132,7 @@ test("reseller-backed user update allows safe fields and rejects technical routi
           password: "admin-pass",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002"],
           trafficLimitBytes: 1000,
           validUntil: "2030-01-02T23:59:59.000Z"
         }
@@ -2281,14 +2249,16 @@ test("reseller-backed user update allows safe fields and rejects technical routi
       assert.equal(updatedOwner.trafficRemainingBytes, 600);
 
       const beforeRejectCalls = calls.length;
-      for (const field of ["inboundId", "inboundIds", "inboundMode", "flow", "panelId"]) {
+      for (const field of ["inboundId", "inboundIds", "inboundMode", "flow", "panelId", "ownerAdminId"]) {
         const value = field === "inboundIds"
           ? ["vless:WS TLS:10002"]
           : field === "inboundMode"
             ? "custom"
             : field === "panelId"
               ? panel.id
-              : "blocked-value";
+              : field === "ownerAdminId"
+                ? "adm_other"
+                : "blocked-value";
         const outcome = await callApiWithOutcome(handleApi, {
           method: "PUT",
           pathname: `/api/admin/users/${user.id}`,
@@ -5420,6 +5390,7 @@ test("reseller can load inbounds for an assigned marzban panel", async () => {
           password: "admin-pass",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:VLESS 443:443"],
           trafficLimitBytes: 1000
         }
       });
@@ -5889,6 +5860,7 @@ test("reseller create vpn account flow works without inboundIds", async () => {
           password: "admin-pass",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002"],
           trafficLimitBytes: 1000,
           validUntil: "2030-01-02T23:59:59.000Z"
         }
@@ -5908,12 +5880,8 @@ test("reseller create vpn account flow works without inboundIds", async () => {
           },
           {
             ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ]
-            })
+            status: 201,
+            json: async () => ({ username: "client-ok" })
           },
           {
             ok: true,
@@ -5922,7 +5890,7 @@ test("reseller create vpn account flow works without inboundIds", async () => {
           },
           {
             ok: true,
-            status: 201,
+            status: 200,
             json: async () => ({ username: "client-ok" })
           }
         ],
@@ -5946,9 +5914,9 @@ test("reseller create vpn account flow works without inboundIds", async () => {
         }
       );
       assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
-      assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
+      assert.equal(calls[1].url, "https://marzban.example.com/api/user");
       assert.equal(calls[2].url, "https://marzban.example.com/api/admin/token");
-      assert.equal(calls[3].url, "https://marzban.example.com/api/user");
+      assert.equal(calls[3].url, "https://marzban.example.com/api/user/client-ok");
     }
   );
 });
@@ -5990,6 +5958,7 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           password: "admin-pass-a",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002"],
           trafficLimitBytes: 1000
         }
       });
@@ -6002,6 +5971,7 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           password: "admin-pass-b",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002"],
           trafficLimitBytes: 1000
         }
       });
@@ -6025,20 +5995,6 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           },
           {
             ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ]
-            })
-          },
-          {
-            ok: true,
-            status: 200,
-            json: async () => ({ access_token: "marzban-token" })
-          },
-          {
-            ok: true,
             status: 201,
             json: async () => ({
               username: "sub-client-a",
@@ -6052,12 +6008,8 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           },
           {
             ok: true,
-            status: 200,
-            json: async () => ({
-              vless: [
-                { tag: "WS TLS", protocol: "vless", network: "ws", tls: "tls", port: 10002 }
-              ]
-            })
+            status: 201,
+            json: async () => ({ username: "sub-client-b" })
           },
           {
             ok: true,
@@ -6066,7 +6018,7 @@ test("marzban-backed user creation stores subscriptionUrl and keeps it scoped to
           },
           {
             ok: true,
-            status: 201,
+            status: 200,
             json: async () => ({ username: "sub-client-b" })
           }
         ],
@@ -6215,6 +6167,7 @@ test("reseller cannot override panelId manually on create", async () => {
           password: "admin-pass",
           role: "admin",
           panelId: panel.id,
+          inboundIds: ["vless:WS TLS:10002"],
           trafficLimitBytes: 1000
         }
       });
@@ -6351,6 +6304,188 @@ test("superadmin admins API returns reseller metrics and role distinction", asyn
       assert.equal(admins.some((admin) => admin.role === "superadmin"), true);
     }
   );
+});
+
+test("superadmin can assign and edit reseller allowed inbounds", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Allowed Inbounds Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+      await withMockFetch([], calls, async () => {
+        const reseller = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/superadmin/admins",
+          session: login.session,
+          body: {
+            username: "allowed-reseller",
+            password: "reseller-pass",
+            role: "admin",
+            panelId: panel.id,
+            inboundIds: ["vless:WS TLS:10002"],
+            trafficLimitBytes: 1000,
+            validUntil: "2035-01-02T23:59:59.000Z"
+          }
+        });
+        assert.deepEqual(reseller.inboundIds, ["vless:WS TLS:10002"]);
+
+        const updated = await callApi(handleApi, {
+          method: "PUT",
+          pathname: `/api/superadmin/admins/${reseller.id}`,
+          session: login.session,
+          body: {
+            username: reseller.username,
+            panelId: panel.id,
+            inboundIds: ["vless:WS TLS:10002", "vmess:VMess TLS:10001"],
+            trafficLimitBytes: 1000,
+            trafficRemainingBytes: 1000,
+            validUntil: "2035-02-03T23:59:59.000Z",
+            active: true,
+            deleteReturnTraffic: true,
+            updateReturnTraffic: true
+          }
+        });
+
+        assert.deepEqual(updated.inboundIds, ["vless:WS TLS:10002", "vmess:VMess TLS:10001"]);
+
+        const admins = await callApi(handleApi, {
+          method: "GET",
+          pathname: "/api/superadmin/admins",
+          session: login.session
+        });
+        const stored = admins.find((admin) => admin.username === reseller.username);
+        assert.deepEqual(stored.inboundIds, ["vless:WS TLS:10002", "vmess:VMess TLS:10001"]);
+      });
+    }
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("reseller create rejects inboundIds outside the reseller allow list and empty allow list fails clearly", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "Allowed Inbounds Panel",
+          type: "marzban",
+          url: "https://marzban.example.com",
+          username: "panel-admin",
+          secret: "panel-secret"
+        }
+      });
+
+      await withMockFetch([], calls, async () => {
+        const reseller = await callApi(handleApi, {
+          method: "POST",
+          pathname: "/api/superadmin/admins",
+          session: login.session,
+          body: {
+            username: "allowed-list-reseller",
+            password: "reseller-pass",
+            role: "admin",
+            panelId: panel.id,
+            inboundIds: ["vless:WS TLS:10002"],
+            trafficLimitBytes: 1000,
+            validUntil: "2035-01-02T23:59:59.000Z"
+          }
+        });
+
+        const wrongInbound = await callApiWithOutcome(handleApi, {
+          method: "POST",
+          pathname: "/api/admin/users",
+          session: (await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            body: { username: reseller.username, password: "reseller-pass" }
+          })).session,
+          body: {
+            username: "outside-allow-list",
+            limitBytes: 100,
+            expiresAt: "2030-01-02T23:59:59.000Z",
+            inboundIds: ["vmess:VMess TLS:10001"],
+            inboundId: "vmess:VMess TLS:10001"
+          }
+        });
+        assert.equal(wrongInbound.statusCode, 400);
+        assert.match(wrongInbound.json.error, /outside the reseller allowed inbounds/i);
+        assert.equal(calls.length, 0);
+
+        const cleared = await callApi(handleApi, {
+          method: "PUT",
+          pathname: `/api/superadmin/admins/${reseller.id}`,
+          session: login.session,
+          body: {
+            username: reseller.username,
+            panelId: panel.id,
+            inboundIds: [],
+            trafficLimitBytes: 1000,
+            trafficRemainingBytes: 1000,
+            validUntil: "2035-02-03T23:59:59.000Z",
+            active: true,
+            deleteReturnTraffic: true,
+            updateReturnTraffic: true
+          }
+        });
+        assert.deepEqual(cleared.inboundIds, []);
+
+        const emptyAllowed = await callApiWithOutcome(handleApi, {
+          method: "POST",
+          pathname: "/api/admin/users",
+          session: (await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/auth/login",
+            body: { username: reseller.username, password: "reseller-pass" }
+          })).session,
+          body: {
+            username: "empty-allow-list",
+            limitBytes: 100,
+            expiresAt: "2030-01-02T23:59:59.000Z"
+          }
+        });
+        assert.equal(emptyAllowed.statusCode, 400);
+        assert.match(emptyAllowed.json.error, /No allowed inbounds assigned to this reseller/i);
+      });
+    }
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("superadmin can edit reseller quota, panel, validity, and return policies", async () => {
@@ -7351,11 +7486,23 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.match(usersSource, /No users yet\./);
 });
 
+test("reseller allowed inbound editing does not auto-grant loaded inbounds", async () => {
+  const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  const createAdminSource = source.slice(source.indexOf("async function loadCreateAdminInbounds"), source.indexOf("function toggleCreateAdminInboundSelection"));
+  const editAdminSource = source.slice(source.indexOf("async function loadEditAdminInbounds"), source.indexOf("function toggleCreateAdminInboundSelection"));
+  assert.match(createAdminSource, /state\.createAdminInboundIds = normalMarzbanInboundIds\(rows\);/);
+  assert.match(editAdminSource, /state\.editAdminInboundIds = selected;/);
+  assert.match(editAdminSource, /Saved allowed inbounds are no longer available on this panel\./);
+  assert.match(editAdminSource, /Select allowed inbounds for this reseller\./);
+  assert.doesNotMatch(editAdminSource, /state\.editAdminInboundIds = selected\.length \? selected : \(existing\.length \? rows\.map\(\(row\) => row\.id\) : \[\]\);/);
+});
+
 test("create and edit user forms load inbounds from panel capabilities", async () => {
   const source = (await readFile(join(process.cwd(), "web/app.js"), "utf8")).replace(/\r\n/g, "\n");
   assert.match(source, /function panelSupportsInboundLoading\(panel\) \{\n  return Boolean\(panel\?\.capabilities\?\.canListInbounds\);\n\}/);
   assert.doesNotMatch(source, /const isMarzban = panel\?\.type === "marzban";/);
   assert.match(source, /<div class="edit-user-side" id="edit-user-inbound-field">\$\{editUserInboundField\(\)\}<\/div>/);
+  assert.match(source, /return editUserProtocolsField\(\);/);
   assert.match(source, /if \(!panelSupportsInboundLoading\(panel\)\) \{/);
   assert.match(source, /Loading inbounds\.\.\./);
   assert.match(source, /Failed to load inbounds/);
@@ -8185,6 +8332,7 @@ test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped
           username: "three-reseller-inbounds",
           password: "reseller-pass",
           panelId: panel.id,
+          inboundIds: ["1"],
           trafficLimitBytes: 1000
         }
       });
@@ -8223,15 +8371,6 @@ test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped
               tls: "tls",
               port: 443,
               enabled: true
-            },
-            {
-              id: "2",
-              label: "VMess 80",
-              protocol: "vmess",
-              network: "tcp",
-              tls: "",
-              port: 80,
-              enabled: false
             }
           ]);
         }
@@ -8241,6 +8380,66 @@ test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped
   assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
   assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
   assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+});
+
+test("reseller with no allowed inbounds receives an empty inbound list", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel Empty",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-empty-inbounds",
+          password: "reseller-pass",
+          panelId: panel.id,
+          inboundIds: [],
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch([], calls, async () => {
+        const inbounds = await callApi(handleApi, {
+          method: "GET",
+          pathname: `/api/admin/panels/${panel.id}/inbounds`,
+          session: resellerLogin.session
+        });
+        assert.deepEqual(inbounds, []);
+      });
+    }
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("reseller create through a three-x-ui panel stores a safe subscriptionUrl", async () => {
@@ -8280,6 +8479,7 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
           username: "three-reseller",
           password: "reseller-pass",
           panelId: panel.id,
+          inboundIds: ["11", "12"],
           trafficLimitBytes: 1000
         }
       });
@@ -8291,22 +8491,6 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
 
       await withMockFetch(
         [
-          createFetchResponse(
-            { success: true, obj: "csrf-token-create-list" },
-            { status: 200, headers: { "set-cookie": "_xui_session=create-list; Path=/; HttpOnly" } }
-          ),
-          createFetchResponse(
-            { success: true, msg: "ok" },
-            { status: 200, headers: { "set-cookie": "_xui_session=session-create-list; Path=/; HttpOnly" } }
-          ),
-          createFetchResponse({
-            success: true,
-            msg: "",
-            obj: [
-              { id: 11, remark: "VLESS 443", protocol: "vless", port: 443, enable: true },
-              { id: 12, remark: "VMess 80", protocol: "vmess", port: 80, enable: true }
-            ]
-          }),
           createFetchResponse(
             { success: true, obj: "csrf-token-create-user" },
             { status: 200, headers: { "set-cookie": "_xui_session=create-user; Path=/; HttpOnly" } }
@@ -8344,8 +8528,8 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
             }
           });
           assert.equal(created.username, "three-user");
-          assert.equal(created.subscriptionId, "sub-123");
-          assert.equal(created.subscriptionUrl, "https://prefix.example.com/sub/sub-123");
+          assert.ok(created.subscriptionId);
+          assert.equal(created.subscriptionUrl, `https://prefix.example.com/sub/${created.subscriptionId}`);
           assert.equal(created.inboundMode, "all");
           assert.deepEqual(created.inboundIds, ["11", "12"]);
 
@@ -8355,7 +8539,7 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
             session: resellerLogin.session
           });
           const stored = users.find((user) => user.username === "three-user");
-          assert.equal(stored.subscriptionUrl, "https://prefix.example.com/sub/sub-123");
+          assert.equal(stored.subscriptionUrl, created.subscriptionUrl);
           assert.equal(stored.ownerUsername, reseller.username);
         }
       );
@@ -8363,11 +8547,8 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
   );
   assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
   assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
-  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
-  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-  assert.equal(calls[5].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  const createBody = JSON.parse(calls[5].options.body);
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  const createBody = JSON.parse(calls[2].options.body);
   assert.deepEqual(createBody.inboundIds, [11, 12]);
   assert.equal(createBody.client.email, "three-user");
 });
@@ -8408,6 +8589,7 @@ test("reseller create through a three-x-ui panel rolls back local state on remot
           username: "three-reseller-rollback",
           password: "reseller-pass",
           panelId: panel.id,
+          inboundIds: ["41"],
           trafficLimitBytes: 1000
         }
       });
@@ -8418,16 +8600,7 @@ test("reseller create through a three-x-ui panel rolls back local state on remot
       });
 
       await withMockFetch(
-        [
-          createFetchResponse({
-            success: true,
-            msg: "",
-            obj: [
-              { id: 41, remark: "VLESS 443", protocol: "vless", port: 443, enable: true }
-            ]
-          }),
-          createFetchResponse({ success: false, msg: "boom" }, { status: 500 })
-        ],
+        [createFetchResponse({ success: false, msg: "boom" }, { status: 500 })],
         calls,
         async () => {
           const created = await callApiWithOutcome(handleApi, {
@@ -8462,8 +8635,7 @@ test("reseller create through a three-x-ui panel rolls back local state on remot
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
 });
 
 test("reseller update, sync, and delete through three-x-ui call the adapter and preserve quota safety", async () => {
@@ -8502,6 +8674,7 @@ test("reseller update, sync, and delete through three-x-ui call the adapter and 
           username: "three-reseller-update",
           password: "reseller-pass",
           panelId: panel.id,
+          inboundIds: ["21", "22"],
           trafficLimitBytes: 1000
         }
       });
@@ -8513,14 +8686,6 @@ test("reseller update, sync, and delete through three-x-ui call the adapter and 
 
       await withMockFetch(
         [
-          createFetchResponse({
-            success: true,
-            msg: "",
-            obj: [
-              { id: 21, remark: "VLESS 443", protocol: "vless", port: 443, enable: true },
-              { id: 22, remark: "VMess 80", protocol: "vmess", port: 80, enable: true }
-            ]
-          }),
           createFetchResponse({
             success: true,
             msg: "",
@@ -8595,11 +8760,10 @@ test("reseller update, sync, and delete through three-x-ui call the adapter and 
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/three-user-update");
-  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-update");
-  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-update");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/three-user-update");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-update");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-update");
 });
 
 test("reseller delete through a three-x-ui panel calls the adapter before local removal", async () => {
@@ -8638,6 +8802,7 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
           username: "three-reseller-delete",
           password: "reseller-pass",
           panelId: panel.id,
+          inboundIds: ["31"],
           trafficLimitBytes: 1000
         }
       });
@@ -8649,13 +8814,6 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
 
       await withMockFetch(
         [
-          createFetchResponse({
-            success: true,
-            msg: "",
-            obj: [
-              { id: 31, remark: "VLESS 443", protocol: "vless", port: 443, enable: true }
-            ]
-          }),
           createFetchResponse({
             success: true,
             msg: "",
@@ -8731,12 +8889,11 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-delete");
-  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
-  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/three-user-delete/detach");
-  assert.deepEqual(JSON.parse(calls[4].options.body), { inboundIds: [31] });
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-delete");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/three-user-delete/detach");
+  assert.deepEqual(JSON.parse(calls[3].options.body), { inboundIds: [31] });
 });
 
 test("skeleton adapters fail clearly on contract methods", async () => {

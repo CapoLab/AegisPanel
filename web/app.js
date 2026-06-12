@@ -20,6 +20,14 @@ const state = {
   editAdminId: "",
   editAdminUsername: "",
   editAdminPanelId: "",
+  createAdminInbounds: [],
+  createAdminInboundsLoading: false,
+  createAdminInboundsError: "",
+  createAdminInboundIds: [],
+  editAdminInbounds: [],
+  editAdminInboundsLoading: false,
+  editAdminInboundsError: "",
+  editAdminInboundIds: [],
   editAdminLimitGb: "",
   editAdminRemainingGb: "",
   editAdminValidUntilDate: "",
@@ -243,6 +251,14 @@ function logout() {
   state.editAdminId = "";
   state.editAdminUsername = "";
   state.editAdminPanelId = "";
+  state.createAdminInbounds = [];
+  state.createAdminInboundsLoading = false;
+  state.createAdminInboundsError = "";
+  state.createAdminInboundIds = [];
+  state.editAdminInbounds = [];
+  state.editAdminInboundsLoading = false;
+  state.editAdminInboundsError = "";
+  state.editAdminInboundIds = [];
   state.editAdminLimitGb = "";
   state.editAdminRemainingGb = "";
   state.editAdminValidUntilDate = "";
@@ -876,18 +892,15 @@ function editPanelModalBody() {
 
 function showAdminForm() {
   if (!requireSuperadminUi()) return;
-  modal("New reseller", `
-    <form class="form" onsubmit="window.Aegis.createAdmin(event)">
-      <label>Username<input name="username" required placeholder="reseller-01" /></label>
-      <label>Password<input name="password" required type="password" placeholder="Strong password" /></label>
-      <label>Role<select name="role"><option value="admin">Reseller</option><option value="superadmin">SuperAdmin</option></select></label>
-      <label>Panel<select name="panelId"><option value="">No fixed panel</option>${(state.data?.panels || []).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
-      <label>Traffic limit (GB)<input name="trafficGb" type="number" min="0" step="1" placeholder="100" /></label>
-      <label>Valid until<input name="validUntilDate" type="date" /></label>
-      <div class="check-row"><label><input name="deleteReturnTraffic" type="checkbox" checked /> Return traffic on delete</label><label><input name="updateReturnTraffic" type="checkbox" checked /> Return traffic on update</label></div>
-      <button class="primary" type="submit">Create reseller</button>
-    </form>
-  `);
+  state.createAdminPanelId = state.data?.panels?.[0]?.id || "";
+  state.createAdminInbounds = [];
+  state.createAdminInboundsLoading = Boolean(state.createAdminPanelId && panelSupportsInboundLoading(state.data?.panels?.find((panel) => panel.id === state.createAdminPanelId)));
+  state.createAdminInboundsError = "";
+  state.createAdminInboundIds = [];
+  modal("New reseller", createAdminModalBody());
+  if (state.createAdminPanelId) {
+    void loadCreateAdminInbounds(state.createAdminPanelId, { silent: true });
+  }
 }
 
 function showEditAdminForm(id) {
@@ -908,11 +921,90 @@ function showEditAdminForm(id) {
     ? (admin.trafficLimitBytes == null ? "" : bytesToGbInputValue(admin.trafficLimitBytes))
     : bytesToGbInputValue(admin.trafficRemainingBytes);
   state.editAdminValidUntilDate = normalizeDateInputValue(admin.validUntil ?? admin.expiresAt);
+  state.editAdminInboundIds = Array.isArray(admin.inboundIds) ? admin.inboundIds.filter((value) => typeof value === "string" && value.trim()) : [];
+  state.editAdminInbounds = [];
+  state.editAdminInboundsLoading = Boolean(admin.panelId && panelSupportsInboundLoading(state.data?.panels?.find((panel) => panel.id === admin.panelId)));
+  state.editAdminInboundsError = "";
   state.editAdminActive = admin.active !== false;
   state.editAdminDeleteReturnTraffic = admin.deleteReturnTraffic !== false;
   state.editAdminUpdateReturnTraffic = admin.updateReturnTraffic !== false;
   state.editAdminError = "";
   modal("Edit reseller", editAdminModalBody());
+  if (admin.panelId) {
+    void loadEditAdminInbounds(admin.panelId, admin.id, { silent: true });
+  }
+}
+
+function createAdminModalBody() {
+  const panels = state.data?.panels || [];
+  const panelOptions = panels.map((panel) => `<option value="${panel.id}"${panel.id === state.createAdminPanelId ? " selected" : ""}>${esc(panel.name)}</option>`).join("");
+  const panel = panels.find((item) => item.id === state.createAdminPanelId);
+  return `
+    <form class="form edit-panel-form edit-admin-form" onsubmit="window.Aegis.createAdmin(event)">
+      <div class="edit-panel-main">
+        <label>Username<input name="username" required placeholder="reseller-01" /></label>
+        <label>Password<input name="password" required type="password" placeholder="Strong password" /></label>
+        <label>Role<select name="role"><option value="admin">Reseller</option><option value="superadmin">SuperAdmin</option></select></label>
+        <label>Panel<select name="panelId" onchange="window.Aegis.loadCreateAdminInbounds(this.value)"><option value="">No fixed panel</option>${panelOptions}</select></label>
+        <label>Traffic limit (GB)<input name="trafficGb" type="number" min="0" step="1" placeholder="100" /></label>
+        <label>Valid until<input name="validUntilDate" type="date" /></label>
+      </div>
+      <div class="edit-panel-side">
+        <div id="create-admin-inbounds-field">${createAdminInboundsField(panel)}</div>
+      </div>
+      <div class="edit-panel-footer">
+        <div class="check-row"><label><input name="deleteReturnTraffic" type="checkbox" checked /> Return traffic on delete</label><label><input name="updateReturnTraffic" type="checkbox" checked /> Return traffic on update</label></div>
+        <button class="primary" type="submit">Create reseller</button>
+      </div>
+    </form>
+  `;
+}
+
+function editAdminInboundsField() {
+  const panel = state.data?.panels?.find((item) => item.id === state.editAdminPanelId);
+  if (!panelSupportsInboundLoading(panel)) {
+    return `<p class="muted">This panel does not expose selectable inbounds.</p>`;
+  }
+  if (state.editAdminInboundsLoading) {
+    return `<p class="muted">Loading inbounds...</p>`;
+  }
+  if (state.editAdminInboundsError) {
+    return `<p class="alert danger">${esc(state.editAdminInboundsError)}</p>`;
+  }
+  return renderMarzbanInboundPicker({
+    title: "Allowed inbounds",
+    inbounds: state.editAdminInbounds,
+    selectedIds: state.editAdminInboundIds,
+    loading: false,
+    error: "",
+    emptyMessage: "This panel has no selectable inbounds yet.",
+    toggleAction: "toggleEditAdminInboundSelection",
+    selectAllAction: "selectAllEditAdminInbounds",
+    clearAction: "clearEditAdminInbounds"
+  });
+}
+
+function createAdminInboundsField(panel = state.data?.panels?.find((item) => item.id === state.createAdminPanelId)) {
+  if (!panelSupportsInboundLoading(panel)) {
+    return `<p class="muted">Select a panel to load allowed inbounds.</p>`;
+  }
+  if (state.createAdminInboundsLoading) {
+    return `<p class="muted">Loading inbounds...</p>`;
+  }
+  if (state.createAdminInboundsError) {
+    return `<p class="alert danger">${esc(state.createAdminInboundsError)}</p>`;
+  }
+  return renderMarzbanInboundPicker({
+    title: "Allowed inbounds",
+    inbounds: state.createAdminInbounds,
+    selectedIds: state.createAdminInboundIds,
+    loading: false,
+    error: "",
+    emptyMessage: "This panel has no selectable inbounds yet.",
+    toggleAction: "toggleCreateAdminInboundSelection",
+    selectAllAction: "selectAllCreateAdminInbounds",
+    clearAction: "clearCreateAdminInbounds"
+  });
 }
 
 function editAdminModalBody() {
@@ -921,7 +1013,7 @@ function editAdminModalBody() {
     <form class="form edit-panel-form edit-admin-form" onsubmit="window.Aegis.saveAdmin(event)">
       <div class="edit-panel-main">
         <label>Username<input name="username" readonly value="${esc(state.editAdminUsername)}" /></label>
-        <label>Assigned Panel<select name="panelId"><option value=""${state.editAdminPanelId ? "" : " selected"}>No fixed panel</option>${panelOptions}</select></label>
+        <label>Assigned Panel<select name="panelId" onchange="window.Aegis.loadEditAdminInbounds(this.value)"><option value=""${state.editAdminPanelId ? "" : " selected"}>No fixed panel</option>${panelOptions}</select></label>
         <label class="unit-field">
           <span>Traffic limit (GB)</span>
           <div class="unit-input">
@@ -939,6 +1031,7 @@ function editAdminModalBody() {
         <label>Valid until<input name="validUntilDate" type="date" value="${esc(state.editAdminValidUntilDate)}" /></label>
       </div>
       <div class="edit-panel-side">
+        <div id="edit-admin-inbounds-field">${editAdminInboundsField()}</div>
         <label class="switch-field">
           <span>
             <strong>Status</strong>
@@ -1000,6 +1093,7 @@ async function saveAdmin(event) {
       body: {
         username: form.get("username"),
         panelId: form.get("panelId") || null,
+        inboundIds: state.editAdminInboundIds,
         trafficLimitBytes: form.get("trafficLimitGb") === "" ? null : gbToBytes(form.get("trafficLimitGb")),
         trafficRemainingBytes: form.get("trafficRemainingGb") === "" ? null : gbToBytes(form.get("trafficRemainingGb")),
         validUntil: resolveLocalDateEndOfDay(form.get("validUntilDate")),
@@ -1385,6 +1479,157 @@ function editUserProtocolsField() {
   `;
 }
 
+async function loadCreateAdminInbounds(panelId, { silent = false } = {}) {
+  state.createAdminPanelId = panelId;
+  const panel = state.data?.panels?.find((item) => item.id === panelId);
+  if (!panel) {
+    state.createAdminInbounds = [];
+    state.createAdminInboundsError = "Select a panel to load inbounds.";
+    state.createAdminInboundsLoading = false;
+    state.createAdminInboundIds = [];
+    refreshCreateAdminInboundsField();
+    return;
+  }
+  if (!panelSupportsInboundLoading(panel)) {
+    state.createAdminInbounds = [];
+    state.createAdminInboundsError = "";
+    state.createAdminInboundsLoading = false;
+    state.createAdminInboundIds = [];
+    refreshCreateAdminInboundsField();
+    return;
+  }
+  state.createAdminInboundsLoading = true;
+  state.createAdminInboundsError = "";
+  state.createAdminInbounds = [];
+  state.createAdminInboundIds = [];
+  refreshCreateAdminInboundsField();
+  try {
+    const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
+    state.createAdminInbounds = rows;
+    state.createAdminInboundIds = normalMarzbanInboundIds(rows);
+    state.createAdminInboundsError = state.createAdminInboundIds.length > 0 ? "" : "This panel has no selectable inbounds yet.";
+  } catch (error) {
+    state.createAdminInbounds = [];
+    state.createAdminInboundIds = [];
+    state.createAdminInboundsError = error.message || "Failed to load inbounds";
+  } finally {
+    state.createAdminInboundsLoading = false;
+    refreshCreateAdminInboundsField();
+  }
+}
+
+async function loadEditAdminInbounds(panelId, adminId, { silent = false } = {}) {
+  state.editAdminPanelId = panelId;
+  const panel = state.data?.panels?.find((item) => item.id === panelId);
+  if (!panel) {
+    state.editAdminInbounds = [];
+    state.editAdminInboundsError = "Select a panel to load inbounds.";
+    state.editAdminInboundsLoading = false;
+    state.editAdminInboundIds = [];
+    refreshEditAdminInboundsField();
+    refreshEditAdminError();
+    return;
+  }
+  if (!panelSupportsInboundLoading(panel)) {
+    state.editAdminInbounds = [];
+    state.editAdminInboundsError = "";
+    state.editAdminInboundsLoading = false;
+    state.editAdminInboundIds = [];
+    refreshEditAdminInboundsField();
+    refreshEditAdminError();
+    return;
+  }
+  state.editAdminInboundsLoading = true;
+  state.editAdminInboundsError = "";
+  state.editAdminInbounds = [];
+  if (!silent) refreshEditAdminInboundsField();
+  refreshEditAdminError();
+  try {
+    const rows = await api(`/api/admin/panels/${panelId}/inbounds`);
+    state.editAdminInbounds = rows;
+    const existing = state.editAdminInboundIds.length ? state.editAdminInboundIds : (state.admins || []).find((item) => item.id === adminId)?.inboundIds || [];
+    const selected = existing.filter((id) => rows.some((row) => row.id === id));
+    state.editAdminInboundIds = selected;
+    if (!rows.length) {
+      state.editAdminInboundsError = "This panel has no selectable inbounds yet.";
+    } else if (selected.length) {
+      state.editAdminInboundsError = "";
+    } else if (existing.length) {
+      state.editAdminInboundsError = "Saved allowed inbounds are no longer available on this panel.";
+    } else {
+      state.editAdminInboundsError = "Select allowed inbounds for this reseller.";
+    }
+  } catch (error) {
+    state.editAdminInbounds = [];
+    state.editAdminInboundIds = [];
+    state.editAdminInboundsError = error.message || "Failed to load inbounds";
+  } finally {
+    state.editAdminInboundsLoading = false;
+    refreshEditAdminInboundsField();
+    refreshEditAdminError();
+  }
+}
+
+function toggleCreateAdminInboundSelection(id, checked) {
+  const selected = new Set(state.createAdminInboundIds);
+  if (checked) selected.add(id);
+  else selected.delete(id);
+  state.createAdminInboundIds = [...selected];
+  state.createAdminInboundsError = "";
+  refreshCreateAdminInboundsField();
+}
+
+function selectAllCreateAdminInbounds() {
+  state.createAdminInboundIds = normalMarzbanInboundIds(state.createAdminInbounds);
+  state.createAdminInboundsError = "";
+  refreshCreateAdminInboundsField();
+}
+
+function clearCreateAdminInbounds() {
+  state.createAdminInboundIds = [];
+  state.createAdminInboundsError = "";
+  refreshCreateAdminInboundsField();
+}
+
+function toggleEditAdminInboundSelection(id, checked) {
+  const selected = new Set(state.editAdminInboundIds);
+  if (checked) selected.add(id);
+  else selected.delete(id);
+  state.editAdminInboundIds = [...selected];
+  state.editAdminInboundsError = "";
+  refreshEditAdminInboundsField();
+}
+
+function selectAllEditAdminInbounds() {
+  state.editAdminInboundIds = normalMarzbanInboundIds(state.editAdminInbounds);
+  state.editAdminInboundsError = "";
+  refreshEditAdminInboundsField();
+}
+
+function clearEditAdminInbounds() {
+  state.editAdminInboundIds = [];
+  state.editAdminInboundsError = "";
+  refreshEditAdminInboundsField();
+}
+
+function refreshCreateAdminInboundsField() {
+  const field = document.querySelector("#create-admin-inbounds-field");
+  if (!field) {
+    setModal("New reseller", createAdminModalBody());
+    return;
+  }
+  field.innerHTML = createAdminInboundsField();
+}
+
+function refreshEditAdminInboundsField() {
+  const field = document.querySelector("#edit-admin-inbounds-field");
+  if (!field) {
+    setModal("Edit reseller", editAdminModalBody());
+    return;
+  }
+  field.innerHTML = editAdminInboundsField();
+}
+
 function createUserExpiryField() {
   return renderExpiryField({
     value: state.createUserExpiryDate,
@@ -1613,6 +1858,7 @@ async function createAdmin(event) {
         password: form.get("password"),
         role: form.get("role"),
         panelId: form.get("panelId") || null,
+        inboundIds: state.createAdminInboundIds,
         trafficLimitBytes: form.get("trafficGb") ? gbToBytes(form.get("trafficGb")) : null,
         validUntil: resolveLocalDateEndOfDay(form.get("validUntilDate")),
         deleteReturnTraffic: form.has("deleteReturnTraffic"),
@@ -2304,6 +2550,14 @@ window.Aegis = {
   savePanel,
   createAdmin,
   saveAdmin,
+  loadCreateAdminInbounds,
+  loadEditAdminInbounds,
+  toggleCreateAdminInboundSelection,
+  selectAllCreateAdminInbounds,
+  clearCreateAdminInbounds,
+  toggleEditAdminInboundSelection,
+  selectAllEditAdminInbounds,
+  clearEditAdminInbounds,
   createUser,
   saveEditUser,
   loadUserInbounds,
