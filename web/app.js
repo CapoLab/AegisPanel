@@ -538,15 +538,15 @@ function panels() {
     ${pageTitle("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs.", `<button class="primary" onclick="window.Aegis.showPanelForm()">New panel</button>`, { showRefresh: false })}
     <section class="card">
       <div class="table-wrap">
-        <table class="table">
+        <table class="table panels-table">
           <thead><tr><th>Name</th><th>Type</th><th>URL</th><th>Sub URL</th><th>Status</th><th>Last Sync</th><th></th></tr></thead>
           <tbody>
             ${rows.map((p) => `
               <tr>
                 <td><strong>${esc(p.name)}</strong></td>
                 <td><span class="badge">${esc(panelLabel(p.type))}</span></td>
-                <td class="mono">${esc(p.url)}</td>
-                <td class="mono">${esc(p.subscriptionUrl || "-")}</td>
+                <td class="mono ellipsis-cell" title="${esc(p.url)}">${esc(p.url)}</td>
+                <td class="mono ellipsis-cell" title="${esc(p.subscriptionUrl || "-")}">${esc(p.subscriptionUrl || "-")}</td>
                 <td><span class="badge ${p.active ? "green" : "red"}">${p.active ? "Active" : "Off"}</span></td>
                 <td>${dateShort(p.lastSyncAt)}</td>
                 <td class="row-actions icon-actions">

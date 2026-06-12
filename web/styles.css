@@ -330,6 +330,34 @@ small {
   min-width: 760px;
 }
 
+.panels-table td.ellipsis-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panels-table td.ellipsis-cell.mono {
+  max-width: 320px;
+}
+
+.panels-table td:last-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.panels-table .row-actions.icon-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+}
+
+.panels-table .row-actions.icon-actions .icon-action {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
 .compact-table {
   min-width: 0;
 }
