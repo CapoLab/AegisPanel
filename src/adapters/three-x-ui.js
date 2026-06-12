@@ -705,13 +705,28 @@ function toRequestBody(body) {
   return JSON.stringify(body);
 }
 
-async function requestPanel(client, auth, path, { method = "GET", body, headers: extraHeaders = {}, errorLabel = "request" } = {}) {
-  const headers = { ...authHeaders(auth), ...extraHeaders };
+async function requestPanelResponse(client, auth, path, { method = "GET", body, headers: extraHeaders = {} } = {}) {
   const requestBody = toRequestBody(body);
-  if (requestBody !== undefined && !headers["content-type"]) {
-    headers["content-type"] = "application/json";
+  const needsRetry = Boolean(auth?.cookie && !auth?.authorization);
+
+  const makeRequest = async (sessionAuth) => {
+    const headers = { ...authHeaders(sessionAuth), ...extraHeaders };
+    if (requestBody !== undefined && !headers["content-type"]) {
+      headers["content-type"] = "application/json";
+    }
+    return performRequest(client, `${client.apiBase}${path}`, { method, headers, body: requestBody });
+  };
+
+  let response = await makeRequest(auth);
+  if (needsRetry && response?.status === 403) {
+    const refreshedAuth = await authenticate(client);
+    response = await makeRequest(refreshedAuth);
   }
-  const response = await performRequest(client, `${client.apiBase}${path}`, { method, headers, body: requestBody });
+  return response;
+}
+
+async function requestPanel(client, auth, path, { method = "GET", body, headers: extraHeaders = {}, errorLabel = "request" } = {}) {
+  const response = await requestPanelResponse(client, auth, path, { method, body, headers: extraHeaders });
   const payload = await readJsonPayload(response);
   if (!response.ok && response.status !== 204) {
     responseError(response, `3x-ui ${errorLabel} failed`);
@@ -841,15 +856,51 @@ export async function deleteUser(panel, user) {
   const auth = await authenticate(client);
   const username = firstString(user?.username, user?.email);
   if (!username) fail(400, "3x-ui email is required");
-  const response = await fetch(`${client.apiBase}/clients/del/${encodeURIComponent(username)}`, {
-    method: "POST",
-    headers: authHeaders(auth)
-  });
-  if (response.status === 404) {
-    return { ok: true, username, status: "missing" };
+  const inboundIds = normalizeInboundIds(user?.inboundIds);
+  const deletePaths = [];
+  if (inboundIds.length > 0) {
+    deletePaths.push({
+      path: `/clients/${encodeURIComponent(username)}/detach`,
+      body: { inboundIds },
+      errorLabel: "detach client inbounds"
+    });
   }
-  if (!response.ok && response.status !== 204) {
-    responseError(response, "3x-ui delete client failed");
+  deletePaths.push({
+    path: `/clients/del/${encodeURIComponent(username)}`,
+    errorLabel: "delete client"
+  });
+  try {
+    for (let index = 0; index < deletePaths.length; index += 1) {
+      const { path, body, errorLabel } = deletePaths[index];
+      const response = await requestPanelResponse(client, auth, path, {
+        method: "POST",
+        body
+      });
+      const payload = await readJsonPayload(response);
+      const missingMessage = String(firstString(payload?.msg, payload?.message, payload?.detail, "")).toLowerCase();
+      const isMissingResponse =
+        response?.status === 404 ||
+        (response?.status === 200 && payload && typeof payload === "object" && payload.success === false &&
+          (missingMessage.includes("not found") || missingMessage.includes("not in any inbound") || missingMessage.includes("already deleted")));
+      if (response?.status === 204) {
+        return { ok: true, username, status: "deleted" };
+      }
+      if (isMissingResponse) {
+        if (index === deletePaths.length - 1) {
+          return { ok: true, username, status: "missing" };
+        }
+        continue;
+      }
+      if (!response?.ok) {
+        responseError(response, `3x-ui ${errorLabel} failed`);
+      }
+      return { ok: true, username, status: "deleted" };
+    }
+  } catch (error) {
+    if (error?.status === 404) {
+      return { ok: true, username, status: "missing" };
+    }
+    throw error;
   }
   return { ok: true, username, status: "deleted" };
 }

@@ -8022,7 +8022,10 @@ test("three-x-ui deleteUser treats missing clients as success", async () => {
         { success: true, msg: "ok" },
         { status: 200, headers: { "set-cookie": "_xui_session=session-delete; Path=/; HttpOnly" } }
       ),
-      createFetchResponse("", { status: 404 })
+      createFetchResponse(
+        { success: false, msg: 'Something went wrong (client "alice" not found in any inbound or client record)' },
+        { status: 200 }
+      )
     ],
     calls,
     async () => {
@@ -8657,7 +8660,8 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
                 subId: "sub-delete",
                 enable: true
               },
-              inboundIds: [31]
+              inboundIds: [31],
+              subscriptionUrl: "https://prefix.example.com/sub/sub-delete"
             }
           }),
           createFetchResponse({
@@ -8725,7 +8729,8 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
   assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
   assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-delete");
   assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
-  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/del/three-user-delete");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/three-user-delete/detach");
+  assert.deepEqual(JSON.parse(calls[4].options.body), { inboundIds: [31] });
 });
 
 test("skeleton adapters fail clearly on contract methods", async () => {

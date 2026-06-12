@@ -2,7 +2,7 @@
   {
     "id": "AP-3X-E2E-001",
     "title": "Run full real Sanaei smoke test",
-    "passes": false,
+    "passes": true,
     "acceptanceCriteria": [
       "Test connection passes on the live Sanaei panel with username/password",
       "Reseller assigned to three-x-ui can create a user",
