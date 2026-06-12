@@ -1287,8 +1287,13 @@ function groupMarzbanInbounds(inbounds) {
   }, {});
 }
 
+function panelTypeCapabilities(type) {
+  return state.meta?.panelTypes?.find((panelType) => panelType.type === type)?.capabilities || null;
+}
+
 function panelSupportsInboundLoading(panel) {
-  return Boolean(panel?.capabilities?.canListInbounds);
+  const capabilities = panel?.capabilities || panelTypeCapabilities(panel?.type);
+  return Boolean(capabilities?.canListInbounds);
 }
 
 function normalMarzbanInboundIds(inbounds) {

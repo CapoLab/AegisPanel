@@ -1,7 +1,8 @@
-Latest commit: 6ae423e Make user inbound UI capability based
+Latest commit: 1ac975c Scope reseller allowed inbounds
 
 Current summary: 3x-ui/Sanaei username/password session login was fixed using live API/Whale Panel/pyxui investigation.
 
 2026-06-12: AP-3X-E2E-001 passed. Live Sanaei create/edit/sync/delete smoke completed, delete cleanup succeeded, and the temporary smoke users/resellers were removed locally.
 2026-06-12: AP-3X-UI-002 passed. Create-user inbound loading now uses adapter capabilities and works for three-x-ui while keeping Marzban behavior unchanged.
 2026-06-12: AP-RBAC-INBOUNDS-004 passed. SuperAdmin reseller allowed-inbounds editing now preserves stored selections and no longer auto-grants all loaded inbounds during edit.
+2026-06-12: AP-RBAC-INBOUNDS-004 frontend capability detection fixed. New reseller allowed inbounds now load from state.meta.panelTypes when panel capabilities are missing inline.

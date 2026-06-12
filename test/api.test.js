@@ -7499,7 +7499,8 @@ test("reseller allowed inbound editing does not auto-grant loaded inbounds", asy
 
 test("create and edit user forms load inbounds from panel capabilities", async () => {
   const source = (await readFile(join(process.cwd(), "web/app.js"), "utf8")).replace(/\r\n/g, "\n");
-  assert.match(source, /function panelSupportsInboundLoading\(panel\) \{\n  return Boolean\(panel\?\.capabilities\?\.canListInbounds\);\n\}/);
+  assert.match(source, /function panelTypeCapabilities\(type\) \{\n  return state\.meta\?\.panelTypes\?\.find\(\(panelType\) => panelType\.type === type\)\?\.capabilities \|\| null;\n\}/);
+  assert.match(source, /function panelSupportsInboundLoading\(panel\) \{\n  const capabilities = panel\?\.capabilities \|\| panelTypeCapabilities\(panel\?\.type\);\n  return Boolean\(capabilities\?\.canListInbounds\);\n\}/);
   assert.doesNotMatch(source, /const isMarzban = panel\?\.type === "marzban";/);
   assert.match(source, /<div class="edit-user-side" id="edit-user-inbound-field">\$\{editUserInboundField\(\)\}<\/div>/);
   assert.match(source, /return editUserProtocolsField\(\);/);
@@ -7510,6 +7511,14 @@ test("create and edit user forms load inbounds from panel capabilities", async (
   assert.match(source, /Please wait for inbounds to load\./);
   assert.match(source, /Select an inbound before creating the VPN account\./);
   assert.match(source, /Select an inbound before saving the VPN account\./);
+});
+
+test("new reseller uses meta panel capabilities when inline capabilities are missing", async () => {
+  const source = await readFile(join(process.cwd(), "web/app.js"), "utf8");
+  const createAdminSource = source.slice(source.indexOf("function showAdminForm()"), source.indexOf("function showEditAdminForm"));
+  assert.match(createAdminSource, /state\.createAdminPanelId = state\.data\?\.panels\?\.\[0\]\?\.id \|\| "";/);
+  assert.match(createAdminSource, /void loadCreateAdminInbounds\(state\.createAdminPanelId, \{ silent: true \}\);/);
+  assert.match(createAdminSource, /state\.createAdminInboundsLoading = Boolean\(state\.createAdminPanelId && panelSupportsInboundLoading/);
 });
 
 test("a superadmin cannot delete itself", async () => {
