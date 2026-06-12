@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import https from "node:https";
 import { readJson } from "../src/utils/http.js";
 import { hashPassword, verifyPassword, signSession, verifySession } from "../src/utils/security.js";
 import { supportedPanels, adapterFor } from "../src/adapters/registry.js";
@@ -3764,11 +3766,13 @@ test("superadmin can edit panels safely without exposing credentials", async () 
           url: "https://panel.example.com",
           subscriptionUrl: "https://prefix.example.com",
           subscriptionPath: "/links/",
+          allowInsecureTls: true,
           username: "panel-user",
           secret: "panel-secret",
           syncIntervalSeconds: 300
         }
       });
+      assert.equal(created.allowInsecureTls, true);
 
       const editable = await callApi(handleApi, {
         method: "GET",
@@ -3778,6 +3782,7 @@ test("superadmin can edit panels safely without exposing credentials", async () 
       assert.equal(editable.username, "panel-user");
       assert.equal(editable.secret, undefined);
       assert.equal(editable.apiKey, undefined);
+      assert.equal(editable.allowInsecureTls, true);
 
       const blankSecretUpdate = await callApi(handleApi, {
         method: "PUT",
@@ -3789,6 +3794,7 @@ test("superadmin can edit panels safely without exposing credentials", async () 
           url: "https://panel-updated.example.com",
           subscriptionUrl: "https://prefix-updated.example.com",
           subscriptionPath: "//sub-links//",
+          allowInsecureTls: false,
           username: "panel-user-updated",
           secret: "",
           active: false,
@@ -3805,6 +3811,7 @@ test("superadmin can edit panels safely without exposing credentials", async () 
       assert.equal(panel.url, "https://panel-updated.example.com");
       assert.equal(panel.subscriptionUrl, "https://prefix-updated.example.com");
       assert.equal(panel.subscriptionPath, "sub-links");
+      assert.equal(panel.allowInsecureTls, false);
       assert.equal(panel.username, "panel-user-updated");
       assert.equal(panel.secret, "panel-secret");
       assert.equal(panel.active, false);
@@ -7331,6 +7338,8 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.match(source, /return `aegispanel-backup-\$\{year\}-\$\{month\}-\$\{day\}-\$\{hour\}-\$\{minute\}\.json`;/);
   assert.match(panelsSource, /pageTitle\("Panels", "Create upstream panels, check adapter capability, and trigger sync jobs\.", `<button class="primary" onclick="window\.Aegis\.showPanelForm\(\)">New panel<\/button>`, \{ showRefresh: false \}\)/);
   assert.doesNotMatch(panelsSource, /<button class="ghost" onclick="window\.Aegis\.load\(\)">Refresh<\/button>/);
+  assert.match(source, /Allow insecure TLS/);
+  assert.match(source, /Use only for test\/self-signed\/IP certificate panels\./);
   assert.match(panelsSource, /iconActionButton\("✎", "Edit panel"/);
   assert.match(panelsSource, /iconActionButton\("≡", "View inbounds"/);
   assert.match(panelsSource, /iconActionButton\("✓", "Test connection"/);
@@ -7542,9 +7551,18 @@ test("three-x-ui authenticates with bearer token or session cookie and normalize
   assert.equal(
     buildThreeXUiClient({
       url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
-      apiKey: "panel-token"
+      apiKey: "panel-token",
+      allowInsecureTls: true
     }).apiBase,
     "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api"
+  );
+  assert.equal(
+    buildThreeXUiClient({
+      url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+      apiKey: "panel-token",
+      allowInsecureTls: true
+    }).allowInsecureTls,
+    true
   );
 
   const bearerCalls = [];
@@ -7610,6 +7628,10 @@ test("three-x-ui authenticates with bearer token or session cookie and normalize
   await withMockFetch(
     [
       createFetchResponse(
+        { success: true, obj: "csrf-token-123" },
+        { status: 200, headers: { "set-cookie": "_xui_session=csrf123; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse(
         { success: true, msg: "ok" },
         { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
       ),
@@ -7635,17 +7657,149 @@ test("three-x-ui authenticates with bearer token or session cookie and normalize
         username: "admin",
         password: "secret"
       });
-      assert.equal(cookieCalls.length, 2);
-      assert.equal(cookieCalls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-      assert.equal(cookieCalls[0].options.method, "POST");
-      assert.deepEqual(JSON.parse(cookieCalls[0].options.body), {
-        username: "admin",
-        password: "secret"
-      });
-      assert.equal(cookieCalls[1].options.headers.cookie, "_xui_session=session123");
+      assert.equal(cookieCalls.length, 3);
+      assert.equal(cookieCalls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+      assert.equal(cookieCalls[0].options.method, "GET");
+      assert.equal(cookieCalls[0].options.headers["x-requested-with"], "XMLHttpRequest");
+      assert.equal(cookieCalls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+      assert.equal(cookieCalls[1].options.method, "POST");
+      assert.equal(cookieCalls[1].options.headers["content-type"], "application/x-www-form-urlencoded");
+      assert.equal(cookieCalls[1].options.headers["x-csrf-token"], "csrf-token-123");
+      assert.equal(cookieCalls[1].options.headers.cookie, "_xui_session=csrf123");
+      assert.equal(cookieCalls[1].options.body, "username=admin&password=secret");
+      assert.equal(cookieCalls[2].options.headers.cookie, "_xui_session=session123");
+      assert.equal(cookieCalls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
       assert.equal(inbounds[0].label, "Out");
     }
   );
+});
+
+test("three-x-ui falls back to the alternate login root when the stripped root fails", async () => {
+  const calls = [];
+  await withMockFetch(
+    [
+      createFetchResponse("", { status: 403 }),
+      createFetchResponse(
+        { success: true, obj: "csrf-token-abc" },
+        { status: 200, headers: { "set-cookie": "_xui_session=csrf456; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse(
+        { success: true, msg: "ok" },
+        { status: 200, headers: { "set-cookie": "_xui_session=session456; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse({
+        success: true,
+        msg: "",
+        obj: [
+          {
+            id: 3,
+            remark: "Out",
+            protocol: "trojan",
+            port: 8443,
+            enable: true,
+            streamSettings: { network: "ws", security: "tls" }
+          }
+        ]
+      })
+    ],
+    calls,
+    async () => {
+      const inbounds = await threeXUiAdapter.listInbounds({
+        url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+        username: "admin",
+        password: "secret"
+      });
+      assert.equal(calls.length, 4);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/csrf-token");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/login");
+      assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+      assert.equal(inbounds[0].label, "Out");
+    }
+  );
+});
+
+test("three-x-ui uses insecure TLS request handling only when enabled", async () => {
+  const originalFetch = global.fetch;
+  const originalRequest = https.request;
+  const originalTransport = process.env.AEGIS_3XUI_POWERSHELL_TRANSPORT;
+  const calls = [];
+  try {
+    process.env.AEGIS_3XUI_POWERSHELL_TRANSPORT = "0";
+    global.fetch = () => {
+      throw new Error("fetch should not be used when insecure TLS is enabled");
+    };
+    https.request = (url, options, callback) => {
+      const requestBody = [];
+      const req = new EventEmitter();
+      req.write = (chunk) => {
+        requestBody.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+      };
+      req.end = () => {
+        const target = typeof url === "string" ? new URL(url) : url;
+        calls.push({
+          url: target.toString(),
+          options,
+          body: requestBody.join("")
+        });
+        const response = new EventEmitter();
+        response.statusCode = 200;
+        response.headers = target.pathname.endsWith("/login") || target.pathname.endsWith("/csrf-token")
+          ? { "set-cookie": ["_xui_session=session123; Path=/; HttpOnly"] }
+          : {};
+        callback(response);
+        const payload = target.pathname.endsWith("/csrf-token")
+          ? { success: true, obj: "csrf-token-xyz" }
+          : target.pathname.endsWith("/login")
+          ? { success: true, msg: "ok" }
+          : {
+              success: true,
+              msg: "",
+              obj: [
+                {
+                  id: 1,
+                  remark: "VLESS 443",
+                  protocol: "vless",
+                  port: 443,
+                  enable: true,
+                  streamSettings: { network: "ws", security: "tls" }
+                }
+              ]
+            };
+        response.emit("data", Buffer.from(JSON.stringify(payload)));
+        response.emit("end");
+      };
+      return req;
+    };
+
+    const result = await threeXUiAdapter.testConnection({
+      url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/",
+      username: "panel-user",
+      secret: "panel-secret",
+      allowInsecureTls: true
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.inboundCount, 1);
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+    assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+    assert.equal(calls[0].options.agent.options.rejectUnauthorized, false);
+    assert.equal(calls[1].options.headers["x-csrf-token"], "csrf-token-xyz");
+    assert.equal(calls[1].options.headers.cookie, "_xui_session=session123");
+    assert.equal(calls[1].options.agent.options.rejectUnauthorized, false);
+    assert.equal(calls[2].options.headers.cookie, "_xui_session=session123");
+    assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+    assert.equal(calls[2].options.agent.options.rejectUnauthorized, false);
+  } finally {
+    global.fetch = originalFetch;
+    https.request = originalRequest;
+    if (originalTransport === undefined) {
+      delete process.env.AEGIS_3XUI_POWERSHELL_TRANSPORT;
+    } else {
+      process.env.AEGIS_3XUI_POWERSHELL_TRANSPORT = originalTransport;
+    }
+  }
 });
 
 test("three-x-ui buildSubscriptionUrl uses the configured panel prefix and path", async () => {
@@ -7803,8 +7957,12 @@ test("three-x-ui syncUserTraffic maps traffic and ignores raw config links", asy
   await withMockFetch(
     [
       createFetchResponse(
+        { success: true, obj: "csrf-token-sync" },
+        { status: 200, headers: { "set-cookie": "_xui_session=csrf-sync; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse(
         { success: true, msg: "ok" },
-        { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
+        { status: 200, headers: { "set-cookie": "_xui_session=session-sync; Path=/; HttpOnly" } }
       ),
       createFetchResponse({
         success: true,
@@ -7840,10 +7998,11 @@ test("three-x-ui syncUserTraffic maps traffic and ignores raw config links", asy
         username: "alice",
         usedBytes: 999
       });
-      assert.equal(calls.length, 3);
-      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/alice");
-      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/alice");
+      assert.equal(calls.length, 4);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/alice");
+      assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/alice");
       assert.equal(result.usedBytes, 150);
       assert.equal(result.subscriptionId, "ticket-123");
       assert.equal(result.subscriptionUrl, "https://prefix.example.com/sub/ticket-123");
@@ -7856,8 +8015,12 @@ test("three-x-ui deleteUser treats missing clients as success", async () => {
   await withMockFetch(
     [
       createFetchResponse(
+        { success: true, obj: "csrf-token-delete" },
+        { status: 200, headers: { "set-cookie": "_xui_session=csrf-delete; Path=/; HttpOnly" } }
+      ),
+      createFetchResponse(
         { success: true, msg: "ok" },
-        { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }
+        { status: 200, headers: { "set-cookie": "_xui_session=session-delete; Path=/; HttpOnly" } }
       ),
       createFetchResponse("", { status: 404 })
     ],
@@ -7870,9 +8033,11 @@ test("three-x-ui deleteUser treats missing clients as success", async () => {
       }, {
         username: "alice"
       });
-      assert.equal(calls.length, 2);
-      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/del/alice");
-      assert.equal(calls[1].options.method, "POST");
+      assert.equal(calls.length, 3);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/del/alice");
+      assert.equal(calls[2].options.method, "POST");
       assert.equal(result.status, "missing");
       assert.equal("token" in result, false);
       assert.equal("password" in result, false);
@@ -7912,6 +8077,7 @@ test("superadmin can fetch normalized three-x-ui inbounds through the api", asyn
 
       await withMockFetch(
         [
+          createFetchResponse({ success: true, obj: "csrf-token-list" }, { status: 200, headers: { "set-cookie": "_xui_session=csrf-list; Path=/; HttpOnly" } }),
           createFetchResponse({ success: true, msg: "ok" }, { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }),
           createFetchResponse({
             success: true,
@@ -7968,8 +8134,9 @@ test("superadmin can fetch normalized three-x-ui inbounds through the api", asyn
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
 });
 
 test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped api", async () => {
@@ -8020,6 +8187,7 @@ test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped
 
       await withMockFetch(
         [
+          createFetchResponse({ success: true, obj: "csrf-token-list" }, { status: 200, headers: { "set-cookie": "_xui_session=csrf-list; Path=/; HttpOnly" } }),
           createFetchResponse({ success: true, msg: "ok" }, { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }),
           createFetchResponse({
             success: true,
@@ -8061,8 +8229,9 @@ test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
 });
 
 test("reseller create through a three-x-ui panel stores a safe subscriptionUrl", async () => {
@@ -8090,7 +8259,8 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
           type: "three-x-ui",
           url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
           subscriptionUrl: "https://prefix.example.com",
-          apiKey: "panel-token"
+          username: "panel-admin",
+          secret: "panel-secret"
         }
       });
       const reseller = await callApi(handleApi, {
@@ -8112,6 +8282,14 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
 
       await withMockFetch(
         [
+          createFetchResponse(
+            { success: true, obj: "csrf-token-create-list" },
+            { status: 200, headers: { "set-cookie": "_xui_session=create-list; Path=/; HttpOnly" } }
+          ),
+          createFetchResponse(
+            { success: true, msg: "ok" },
+            { status: 200, headers: { "set-cookie": "_xui_session=session-create-list; Path=/; HttpOnly" } }
+          ),
           createFetchResponse({
             success: true,
             msg: "",
@@ -8120,6 +8298,14 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
               { id: 12, remark: "VMess 80", protocol: "vmess", port: 80, enable: true }
             ]
           }),
+          createFetchResponse(
+            { success: true, obj: "csrf-token-create-user" },
+            { status: 200, headers: { "set-cookie": "_xui_session=create-user; Path=/; HttpOnly" } }
+          ),
+          createFetchResponse(
+            { success: true, msg: "ok" },
+            { status: 200, headers: { "set-cookie": "_xui_session=session-create-user; Path=/; HttpOnly" } }
+          ),
           createFetchResponse({
             success: true,
             msg: "",
@@ -8166,9 +8352,13 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  const createBody = JSON.parse(calls[1].options.body);
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[5].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  const createBody = JSON.parse(calls[5].options.body);
   assert.deepEqual(createBody.inboundIds, [11, 12]);
   assert.equal(createBody.client.email, "three-user");
 });

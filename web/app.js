@@ -810,6 +810,8 @@ function showPanelForm() {
       <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_URL_PREFIX</small>
       <label>Subscription Path<input name="subscriptionPath" placeholder="sub" /></label>
       <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_PATH. Default: sub</small>
+      <label class="check-row"><input name="allowInsecureTls" type="checkbox" /> <span>Allow insecure TLS</span></label>
+      <small class="muted block">Use only for test/self-signed/IP certificate panels.</small>
       <label>Username<input name="username" placeholder="panel admin, if needed" /></label>
       <label>Secret / API key<input name="secret" placeholder="stored locally for connector use" /></label>
       <button class="primary" type="submit">Create panel</button>
@@ -845,6 +847,8 @@ function editPanelModalBody() {
         <small class="muted block">Matches Marzban XRAY_SUBSCRIPTION_URL_PREFIX</small>
         <label>Username<input name="username" required value="${esc(panel.username || "")}" placeholder="panel admin, if needed" /></label>
         <label>Secret/API key<input name="secret" type="password" placeholder="Leave blank to keep existing" /></label>
+        <label class="check-row"><input name="allowInsecureTls" type="checkbox"${panel.allowInsecureTls || panel.insecureTls ? " checked" : ""} /> <span>Allow insecure TLS</span></label>
+        <small class="muted block">Use only for test/self-signed/IP certificate panels.</small>
       </div>
       <div class="edit-panel-side">
         <label>Type<select name="type" disabled><option value="${esc(panel.type || "")}" selected>${esc(panelLabel(panel.type) || panel.type || "-")}</option></select></label>
@@ -1546,7 +1550,10 @@ async function createPanel(event) {
   await runAction(async () => {
     await api("/api/superadmin/panels", {
       method: "POST",
-      body: Object.fromEntries(form.entries())
+      body: {
+        ...Object.fromEntries(form.entries()),
+        allowInsecureTls: form.has("allowInsecureTls")
+      }
     });
   }, "Panel created");
 }
@@ -1576,6 +1583,7 @@ async function savePanel(event) {
         url: form.get("url"),
         subscriptionUrl: form.get("subscriptionUrl") || "",
         subscriptionPath: form.get("subscriptionPath") || "",
+        allowInsecureTls: form.has("allowInsecureTls"),
         username: form.get("username"),
         secret: form.get("secret") || "",
         active: form.has("active"),

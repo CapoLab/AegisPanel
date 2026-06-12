@@ -1,3 +1,6 @@
+import http from "node:http";
+import https from "node:https";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 function fail(status, message) {
@@ -22,9 +25,26 @@ function normalizeBaseUrl(url) {
   return trimmed;
 }
 
+function allowInsecureTls(panel) {
+  return panel?.allowInsecureTls === true || panel?.insecureTls === true;
+}
+
 function normalizeLoginBaseUrl(url) {
   const base = normalizeBaseUrl(url);
   return base.replace(/\/panel$/i, "") || base;
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    const normalized = value.trim().replace(/\/+$/, "");
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 function firstString(...values) {
@@ -98,18 +118,54 @@ function responseError(response, message) {
   fail(response?.status || 502, `${message} with HTTP ${response?.status}`);
 }
 
+function requestFailureMessage(error) {
+  const code = error?.cause?.code || error?.code || "";
+  const message = String(error?.message || "").toLowerCase();
+  if (
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" ||
+    code === "ERR_TLS_CERT_ALTNAME_INVALID" ||
+    code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+    code === "CERT_HAS_EXPIRED" ||
+    message.includes("certificate") ||
+    message.includes("self signed")
+  ) {
+    return "TLS/certificate issue";
+  }
+  if (code === "ECONNRESET" || message.includes("connection reset")) {
+    return "connection reset";
+  }
+  if (code === "ECONNREFUSED" || code === "EHOSTUNREACH" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "ENOTFOUND" || code === "ETIMEDOUT") {
+    return "unreachable panel";
+  }
+  if (code === "HPE_INVALID_CONSTANT" || code === "ERR_INVALID_PROTOCOL" || message.includes("invalid http version") || message.includes("invalid protocol")) {
+    return "invalid protocol response";
+  }
+  return "request failed";
+}
+
 function authHeaders(auth) {
-  const headers = { accept: "application/json" };
+  const headers = {
+    accept: "application/json",
+    "x-requested-with": "XMLHttpRequest"
+  };
   if (auth?.authorization) headers.authorization = auth.authorization;
   if (auth?.cookie) headers.cookie = auth.cookie;
+  if (auth?.csrfToken) headers["x-csrf-token"] = auth.csrfToken;
   return headers;
 }
 
 function extractSessionCookie(response) {
-  const direct = firstString(response?.headers?.get?.("set-cookie"), response?.headers?.get?.("Set-Cookie"));
+  const direct =
+    response?.headers?.getSetCookie?.() ??
+    response?.headers?.raw?.()?.["set-cookie"] ??
+    response?.headers?.get?.("set-cookie") ??
+    response?.headers?.get?.("Set-Cookie") ??
+    response?.headers?.["set-cookie"] ??
+    response?.headers?.["Set-Cookie"];
   if (!direct) return "";
-  return direct
-    .split(/,(?=[^;]+=[^;]+)/)
+  const values = Array.isArray(direct) ? direct : [direct];
+  return values
+    .flatMap((value) => String(value).split(/,(?=[^;]+=[^;]+)/))
     .map((part) => part.split(";")[0].trim())
     .filter(Boolean)
     .join("; ");
@@ -167,6 +223,286 @@ function buildSubscriptionFallback(panel, identifier) {
   if (!token) return null;
   const path = normalizeSubscriptionPath(panel?.subscriptionPath);
   return `${prefix}/${path}/${encodeURIComponent(token)}`;
+}
+
+function normalizeHeaderMap(headers) {
+  const map = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    map[String(key).toLowerCase()] = value;
+  }
+  return map;
+}
+
+function buildNodeResponse(status, headers, chunks) {
+  const buffer = Buffer.concat(chunks);
+  const headerMap = normalizeHeaderMap(headers);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        const key = String(name || "").toLowerCase();
+        const value = headerMap[key];
+        if (Array.isArray(value)) return value.join(", ");
+        return firstString(value);
+      }
+    },
+    async text() {
+      return buffer.toString("utf8");
+    }
+  };
+}
+
+function buildFetchLikeResponse(status, headers, text) {
+  const bodyText = typeof text === "string" ? text : "";
+  const headerMap = normalizeHeaderMap(headers);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        const key = String(name || "").toLowerCase();
+        const value = headerMap[key];
+        if (Array.isArray(value)) return value.join(", ");
+        return firstString(value);
+      }
+    },
+    async text() {
+      return bodyText;
+    }
+  };
+}
+
+function requestWithNode(url, { method = "GET", headers = {}, body, insecureTls = false } = {}) {
+  const target = new URL(url);
+  const transport = target.protocol === "https:" ? https : http;
+  const requestBody = body instanceof URLSearchParams ? body.toString() : body;
+  const requestOptions = {
+    method,
+    headers,
+    ...(target.protocol === "https:" && insecureTls ? { agent: new https.Agent({ rejectUnauthorized: false }) } : {})
+  };
+  return new Promise((resolve, reject) => {
+    const req = transport.request(target, requestOptions, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("end", () => {
+        resolve(buildNodeResponse(response.statusCode || 0, response.headers || {}, chunks));
+      });
+    });
+    req.on("error", reject);
+    if (requestBody !== undefined) req.write(requestBody);
+    req.end();
+  });
+}
+
+function requestWithPowerShell(url, { method = "GET", headers = {}, body } = {}) {
+  const payload = {
+    url,
+    method,
+    headers,
+    body: body === undefined ? null : body
+  };
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+$payload = $env:AEGIS_3XUI_REQUEST | ConvertFrom-Json -Depth 32
+$headers = @{}
+if ($null -ne $payload.headers) {
+  foreach ($prop in $payload.headers.PSObject.Properties) {
+    if ($prop.Name -ieq 'content-type') {
+      continue
+    }
+    $headers[$prop.Name] = [string]$prop.Value
+  }
+}
+$invokeParams = @{
+  Uri = [string]$payload.url
+  Method = [string]$payload.method
+  SkipCertificateCheck = $true
+  Headers = $headers
+  ErrorAction = 'Stop'
+  SkipHttpErrorCheck = $true
+}
+if ($null -ne $payload.body -and [string]$payload.body -ne '') {
+  $invokeParams.Body = [string]$payload.body
+}
+if ($null -ne $payload.headers -and $payload.headers.PSObject.Properties.Name -contains 'content-type') {
+  $invokeParams.ContentType = [string]$payload.headers.'content-type'
+}
+$resp = Invoke-WebRequest @invokeParams
+$result = [ordered]@{
+  status = [int]$resp.StatusCode
+  headers = @{}
+  body = $resp.Content
+}
+foreach ($name in $resp.Headers.Keys) {
+  $result.headers[$name] = [string]$resp.Headers[$name]
+}
+$result | ConvertTo-Json -Depth 10 -Compress
+`;
+  return new Promise((resolve, reject) => {
+    const child = spawn("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        AEGIS_3XUI_REQUEST: JSON.stringify(payload)
+      }
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `powershell exited with code ${code}`));
+        return;
+      }
+      try {
+        const parsed = stdout.trim() ? JSON.parse(stdout) : {};
+        resolve(buildFetchLikeResponse(parsed.status || 0, parsed.headers || {}, parsed.body || ""));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+async function performRequest(client, url, { method = "GET", body, headers = {} } = {}) {
+  const requestBody = toRequestBody(body);
+  try {
+    const preferPowerShell =
+      client.allowInsecureTls &&
+      process.platform === "win32" &&
+      process.env.AEGIS_3XUI_POWERSHELL_TRANSPORT !== "0";
+    if (preferPowerShell) {
+      try {
+        return await requestWithPowerShell(url, {
+          method,
+          headers,
+          body: requestBody
+        });
+      } catch (error) {
+        try {
+          return await requestWithNode(url, {
+            method,
+            headers,
+            body: requestBody,
+            insecureTls: true
+          });
+        } catch {
+          fail(502, `3x-ui request failed: ${requestFailureMessage(error)}`);
+        }
+      }
+    }
+    if (client.allowInsecureTls) {
+      return await requestWithNode(url, {
+        method,
+        headers,
+        body: requestBody,
+        insecureTls: true
+      });
+    }
+    return await fetch(url, {
+      method,
+      headers,
+      body: requestBody
+    });
+  } catch (error) {
+    if (client.allowInsecureTls && process.platform === "win32") {
+      try {
+        return await requestWithPowerShell(url, {
+          method,
+          headers,
+          body: requestBody
+        });
+      } catch {
+        // Fall through to the original Node/fetch error below.
+      }
+    }
+    fail(502, `3x-ui request failed: ${requestFailureMessage(error)}`);
+  }
+}
+
+function buildAuthRoots(panel) {
+  return uniqueStrings([normalizeLoginBaseUrl(panel?.url), normalizeBaseUrl(panel?.url)]);
+}
+
+async function requestSessionToken(client, root) {
+  const response = await performRequest(client, `${root}/csrf-token`, {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      "x-requested-with": "XMLHttpRequest"
+    }
+  });
+  const payload = await readJsonPayload(response);
+  if (!response.ok) {
+    responseError(response, "3x-ui csrf token request failed");
+  }
+  const token = firstString(payload?.obj, payload?.data?.obj, payload?.token, payload?.data?.token);
+  if (!token) {
+    fail(502, "3x-ui csrf token response missing token");
+  }
+  const cookie = extractSessionCookie(response);
+  if (!cookie) {
+    fail(502, "3x-ui csrf token response missing session cookie");
+  }
+  return { token, cookie };
+}
+
+async function authenticateWithSession(client, root) {
+  let token;
+  let cookie;
+  try {
+    ({ token, cookie } = await requestSessionToken(client, root));
+  } catch (error) {
+    error.stage = "csrf";
+    throw error;
+  }
+  const response = await performRequest(client, `${root}/login`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+      "x-requested-with": "XMLHttpRequest",
+      "x-csrf-token": token,
+      cookie
+    },
+    body: new URLSearchParams({
+      username: client.username,
+      password: client.password
+    })
+  });
+  const payload = await readJsonPayload(response);
+  if (!response.ok) {
+    if (response.status === 401) {
+      const error = new Error(firstString(payload?.msg, "3x-ui login failed"));
+      error.status = 401;
+      error.stage = "login";
+      throw error;
+    }
+    responseError(response, "3x-ui login failed");
+  }
+  if (payload && typeof payload === "object" && payload.success === false) {
+    const error = new Error(firstString(payload?.msg, "3x-ui login failed"));
+    error.status = 401;
+    error.stage = "login";
+    throw error;
+  }
+  const tokenFromResponse = firstString(payload?.access_token, payload?.token, payload?.data?.access_token, payload?.data?.token);
+  if (tokenFromResponse) {
+    return { authorization: `Bearer ${tokenFromResponse}` };
+  }
+  const sessionCookie = extractSessionCookie(response) || cookie;
+  if (!sessionCookie) {
+    fail(502, "3x-ui login response missing session cookie");
+  }
+  return { cookie: sessionCookie, csrfToken: token };
 }
 
 function extractTrafficBytes(payload) {
@@ -364,7 +700,8 @@ function buildSubscriptionUrlFromPayload(panel, payload, user) {
 
 function toRequestBody(body) {
   if (body === undefined || body === null) return undefined;
-  if (typeof body === "string" || body instanceof URLSearchParams) return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  if (typeof body === "string") return body;
   return JSON.stringify(body);
 }
 
@@ -374,11 +711,7 @@ async function requestPanel(client, auth, path, { method = "GET", body, headers:
   if (requestBody !== undefined && !headers["content-type"]) {
     headers["content-type"] = "application/json";
   }
-  const response = await fetch(`${client.apiBase}${path}`, {
-    method,
-    headers,
-    body: requestBody
-  });
+  const response = await performRequest(client, `${client.apiBase}${path}`, { method, headers, body: requestBody });
   const payload = await readJsonPayload(response);
   if (!response.ok && response.status !== 204) {
     responseError(response, `3x-ui ${errorLabel} failed`);
@@ -392,6 +725,7 @@ export function buildClient(panel) {
   const apiKey = firstString(panel?.apiKey, panel?.token);
   const username = firstString(panel?.username);
   const password = firstString(panel?.password, panel?.secret);
+  const insecureTls = allowInsecureTls(panel);
   if (!apiKey && (!username || !password)) {
     fail(400, "3x-ui apiKey or username and password are required");
   }
@@ -399,9 +733,11 @@ export function buildClient(panel) {
     baseUrl,
     apiBase: `${baseUrl}/api`,
     loginUrl,
+    authRoots: buildAuthRoots(panel),
     apiKey,
     username,
-    password
+    password,
+    allowInsecureTls: insecureTls
   };
 }
 
@@ -409,30 +745,22 @@ export async function authenticate(client) {
   if (client.apiKey) {
     return { authorization: `Bearer ${client.apiKey}` };
   }
-  const response = await fetch(client.loginUrl, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      username: client.username,
-      password: client.password
-    })
-  });
-  const payload = await readJsonPayload(response);
-  if (!response.ok) {
-    responseError(response, "3x-ui login failed");
+  let lastError = null;
+  const roots = Array.isArray(client.authRoots) && client.authRoots.length > 0
+    ? client.authRoots
+    : [normalizeLoginBaseUrl(client.baseUrl || client.loginUrl || "")];
+  for (const root of roots) {
+    try {
+      return await authenticateWithSession(client, root);
+    } catch (error) {
+      lastError = error;
+      if (error?.stage === "login" && error?.status === 401) {
+        throw error;
+      }
+      continue;
+    }
   }
-  const token = firstString(payload?.access_token, payload?.token, payload?.data?.access_token, payload?.data?.token);
-  if (token) {
-    return { authorization: `Bearer ${token}` };
-  }
-  const cookie = extractSessionCookie(response);
-  if (!cookie) {
-    fail(502, "3x-ui login response missing session cookie");
-  }
-  return { cookie };
+  throw lastError || new Error("3x-ui login failed");
 }
 
 export async function listInbounds(panel) {

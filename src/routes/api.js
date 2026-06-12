@@ -176,6 +176,19 @@ function parseNullableNonNegativeNumber(value, key) {
   return parsed;
 }
 
+function parseBoolean(value, fallback = false) {
+  if (value == null) return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+  return Boolean(value);
+}
+
 function isPublicSubscriptionUrl(value) {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
@@ -673,6 +686,7 @@ export async function handleApi(req, res, route) {
       url,
       subscriptionUrl: validateHttpUrl(body.subscriptionUrl ?? "", "subscriptionUrl", { allowEmpty: true }),
       subscriptionPath: normalizePanelSubscriptionPath(body.subscriptionPath),
+      allowInsecureTls: parseBoolean(body.allowInsecureTls ?? body.insecureTls, false),
       username: body.username || "",
       secret: body.secret || "",
       apiKey: body.apiKey || "",
@@ -707,6 +721,9 @@ export async function handleApi(req, res, route) {
     }
     if (Object.prototype.hasOwnProperty.call(body, "subscriptionPath")) {
       patch.subscriptionPath = normalizePanelSubscriptionPath(body.subscriptionPath);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "allowInsecureTls") || Object.prototype.hasOwnProperty.call(body, "insecureTls")) {
+      patch.allowInsecureTls = parseBoolean(body.allowInsecureTls ?? body.insecureTls, panel.allowInsecureTls ?? panel.insecureTls ?? false);
     }
     if (Object.prototype.hasOwnProperty.call(body, "username")) patch.username = requiredString(body, "username");
     const credentialValue = [body.secret, body.password, body.apiKey].find((value) => typeof value === "string" && value.trim());
