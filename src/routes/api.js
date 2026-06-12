@@ -786,8 +786,8 @@ export async function handleApi(req, res, route) {
 
   const scopedInbounds = match(pathname, "/api/admin/panels/:id/inbounds");
   if (scopedInbounds && method === "GET") {
-    requireAuth(req, "superadmin");
-    const panel = store.find("panels", scopedInbounds.id);
+    const actor = requireAuth(req);
+    const panel = scopedPanels(actor).find((item) => item.id === scopedInbounds.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
     const adapter = adapterFor(panel.type);
     if (!adapterSupports(adapter, "canListInbounds", "listInbounds")) {

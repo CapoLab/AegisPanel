@@ -5375,7 +5375,8 @@ test("superadmin can fetch normalized marzban inbounds through the api", async (
   assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
 });
 
-test("reseller cannot load inbounds for an assigned marzban panel", async () => {
+test("reseller can load inbounds for an assigned marzban panel", async () => {
+  const calls = [];
   await withTempEnv(
     {
       AEGIS_ADMIN_USERNAME: "env-admin",
@@ -5400,8 +5401,8 @@ test("reseller cannot load inbounds for an assigned marzban panel", async () => 
           url: "https://marzban.example.com/",
           username: "marzban-admin",
           secret: "marzban-pass"
-          }
-        });
+        }
+      });
       const reseller = await callApi(handleApi, {
         method: "POST",
         pathname: "/api/superadmin/admins",
@@ -5419,15 +5420,47 @@ test("reseller cannot load inbounds for an assigned marzban panel", async () => 
         pathname: "/api/auth/login",
         body: { username: reseller.username, password: "admin-pass" }
       });
-      const res = await callApiWithOutcome(handleApi, {
-        method: "GET",
-        pathname: `/api/admin/panels/${panel.id}/inbounds`,
-        session: resellerLogin.session
-      });
-      assert.ok([403, 404].includes(res.statusCode));
-      assert.match(res.json.error, /Insufficient permissions|Panel not found/i);
+      await withMockFetch(
+        [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: "marzban-token" })
+          },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              vless: [
+                { tag: "VLESS 443", protocol: "vless", network: "ws", tls: "tls", port: 443 }
+              ]
+            })
+          }
+        ],
+        calls,
+        async () => {
+          const inbounds = await callApi(handleApi, {
+            method: "GET",
+            pathname: `/api/admin/panels/${panel.id}/inbounds`,
+            session: resellerLogin.session
+          });
+          assert.deepEqual(inbounds, [
+            {
+              id: "vless:VLESS 443:443",
+              label: "VLESS 443",
+              protocol: "vless",
+              network: "ws",
+              tls: "tls",
+              port: 443,
+              enabled: true
+            }
+          ]);
+        }
+      );
     }
   );
+  assert.equal(calls[0].url, "https://marzban.example.com/api/admin/token");
+  assert.equal(calls[1].url, "https://marzban.example.com/api/inbounds");
 });
 
 test("reseller cannot load inbounds for an unassigned marzban panel", async () => {
@@ -7939,6 +7972,99 @@ test("superadmin can fetch normalized three-x-ui inbounds through the api", asyn
   assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
 });
 
+test("reseller can fetch normalized three-x-ui inbounds through the admin-scoped api", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-inbounds",
+          password: "reseller-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({ success: true, msg: "ok" }, { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              { id: 1, remark: "VLESS 443", protocol: "vless", port: 443, enable: true, streamSettings: { network: "ws", security: "tls" } },
+              { id: 2, remark: "VMess 80", protocol: "vmess", port: 80, enable: false, network: "tcp", tls: "" }
+            ]
+          })
+        ],
+        calls,
+        async () => {
+          const inbounds = await callApi(handleApi, {
+            method: "GET",
+            pathname: `/api/admin/panels/${panel.id}/inbounds`,
+            session: resellerLogin.session
+          });
+          assert.deepEqual(inbounds, [
+            {
+              id: "1",
+              label: "VLESS 443",
+              protocol: "vless",
+              network: "ws",
+              tls: "tls",
+              port: 443,
+              enabled: true
+            },
+            {
+              id: "2",
+              label: "VMess 80",
+              protocol: "vmess",
+              network: "tcp",
+              tls: "",
+              port: 80,
+              enabled: false
+            }
+          ]);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+});
+
 test("reseller create through a three-x-ui panel stores a safe subscriptionUrl", async () => {
   const calls = [];
   await withTempEnv(
@@ -8045,6 +8171,100 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
   const createBody = JSON.parse(calls[1].options.body);
   assert.deepEqual(createBody.inboundIds, [11, 12]);
   assert.equal(createBody.client.email, "three-user");
+});
+
+test("reseller create through a three-x-ui panel rolls back local state on remote failure", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          apiKey: "panel-token"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-rollback",
+          password: "reseller-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              { id: 41, remark: "VLESS 443", protocol: "vless", port: 443, enable: true }
+            ]
+          }),
+          createFetchResponse({ success: false, msg: "boom" }, { status: 500 })
+        ],
+        calls,
+        async () => {
+          const created = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "three-user-rollback",
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "rollback me"
+            }
+          });
+          assert.ok([500, 502].includes(created.statusCode));
+          assert.match(created.json.error, /failed/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session
+          });
+          assert.equal(users.some((user) => user.username === "three-user-rollback"), false);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const storedReseller = admins.find((item) => item.username === reseller.username);
+          assert.equal(storedReseller.trafficRemainingBytes, 1000);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
 });
 
 test("reseller update, sync, and delete through three-x-ui call the adapter and preserve quota safety", async () => {
