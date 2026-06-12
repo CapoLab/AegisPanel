@@ -1,0 +1,3 @@
+Latest commit: c45c67a Fix 3x-ui Sanaei session login
+
+Current summary: 3x-ui/Sanaei username/password session login was fixed using live API/Whale Panel/pyxui investigation. Next step is full real Sanaei create/edit/sync/delete smoke test.

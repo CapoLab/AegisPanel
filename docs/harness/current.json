@@ -1,0 +1,40 @@
+[
+  {
+    "id": "AP-3X-E2E-001",
+    "title": "Run full real Sanaei smoke test",
+    "passes": false,
+    "acceptanceCriteria": [
+      "Test connection passes on the live Sanaei panel with username/password",
+      "Reseller assigned to three-x-ui can create a user",
+      "User appears in Sanaei",
+      "subscriptionUrl is https://91.107.244.47:2096/sub/<subId>",
+      "Edit updates the remote user",
+      "Sync reads remote traffic safely",
+      "Delete removes the user from Sanaei",
+      "Quota return behavior is correct"
+    ]
+  },
+  {
+    "id": "AP-3X-UI-002",
+    "title": "Make create-user inbound loading panel-agnostic",
+    "passes": false,
+    "acceptanceCriteria": [
+      "Frontend no longer hardcodes inbound loading to Marzban only",
+      "three-x-ui assigned reseller can load selectable inbounds when needed",
+      "Marzban inbound selection behavior remains unchanged",
+      "npm test passes"
+    ]
+  },
+  {
+    "id": "AP-3X-SAFETY-003",
+    "title": "Run three-x-ui failure safety smoke test",
+    "passes": false,
+    "acceptanceCriteria": [
+      "Bad credentials fail with clear error",
+      "Failed remote create does not create local user",
+      "Failed remote create does not consume quota",
+      "Failed remote update does not corrupt local user or quota",
+      "Failed remote delete does not remove local user or return quota incorrectly"
+    ]
+  }
+]
