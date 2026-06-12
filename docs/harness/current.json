@@ -17,7 +17,7 @@
   {
     "id": "AP-3X-UI-002",
     "title": "Make create-user inbound loading panel-agnostic",
-    "passes": false,
+    "passes": true,
     "acceptanceCriteria": [
       "Frontend no longer hardcodes inbound loading to Marzban only",
       "three-x-ui assigned reseller can load selectable inbounds when needed",

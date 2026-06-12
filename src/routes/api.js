@@ -44,7 +44,11 @@ function adminWithMetrics(admin) {
 
 function publicPanel(panel) {
   const { username, secret, apiKey, token, credentials, password, ...safe } = panel;
-  return safe;
+  const adapter = adapterFor(panel?.type);
+  return {
+    ...safe,
+    capabilities: cloneJson(adapter?.capabilities || {})
+  };
 }
 
 function cloneJson(value) {
@@ -105,7 +109,11 @@ function validateRestoreAdmins(admins) {
 
 function editablePanel(panel) {
   const { secret, apiKey, token, credentials, password, ...safe } = panel;
-  return safe;
+  const adapter = adapterFor(panel?.type);
+  return {
+    ...safe,
+    capabilities: cloneJson(adapter?.capabilities || {})
+  };
 }
 
 function adapterSupports(adapter, capability, methodName) {

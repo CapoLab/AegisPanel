@@ -3,3 +3,4 @@ Latest commit: c45c67a Fix 3x-ui Sanaei session login
 Current summary: 3x-ui/Sanaei username/password session login was fixed using live API/Whale Panel/pyxui investigation.
 
 2026-06-12: AP-3X-E2E-001 passed. Live Sanaei create/edit/sync/delete smoke completed, delete cleanup succeeded, and the temporary smoke users/resellers were removed locally.
+2026-06-12: AP-3X-UI-002 passed. Create-user inbound loading now uses adapter capabilities and works for three-x-ui while keeping Marzban behavior unchanged.

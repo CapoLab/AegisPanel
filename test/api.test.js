@@ -3343,6 +3343,7 @@ test("panel credentials are stripped from api responses", async () => {
       assert.equal(panelList[0].username, undefined);
       assert.equal(panelList[0].secret, undefined);
       assert.equal(panelList[0].apiKey, undefined);
+      assert.equal(panelList[0].capabilities?.canListInbounds, true);
 
       const owner = await callApi(handleApi, {
         method: "POST",
@@ -7350,13 +7351,18 @@ test("sidebar nav stays role scoped for superadmin and reseller", async () => {
   assert.match(usersSource, /No users yet\./);
 });
 
-test("create and edit user forms keep Marzban inbounds selectable", async () => {
+test("create and edit user forms load inbounds from panel capabilities", async () => {
   const source = (await readFile(join(process.cwd(), "web/app.js"), "utf8")).replace(/\r\n/g, "\n");
-  assert.doesNotMatch(source, /realMarzbanInbounds|isDummyOrMetricsInbound/);
-  assert.match(source, /normalMarzbanInboundIds\(inbounds\) \{\n  return \(inbounds \|\| \[\]\)\.map\(\(inbound\) => inbound\.id\);\n\}/);
-  assert.match(source, /preferredMarzbanInboundId\(inboundIds, fallbackId = ""\) \{\n  const selected = Array\.isArray\(inboundIds\) \? inboundIds\.filter\(\(id\) => typeof id === "string" && id\.trim\(\)\) : \[\];\n  return selected\[0\] \|\| fallbackId \|\| "default";\n\}/);
-  assert.match(source, /#user-create-error/);
-  assert.match(source, /#edit-user-error/);
+  assert.match(source, /function panelSupportsInboundLoading\(panel\) \{\n  return Boolean\(panel\?\.capabilities\?\.canListInbounds\);\n\}/);
+  assert.doesNotMatch(source, /const isMarzban = panel\?\.type === "marzban";/);
+  assert.match(source, /<div class="edit-user-side" id="edit-user-inbound-field">\$\{editUserInboundField\(\)\}<\/div>/);
+  assert.match(source, /if \(!panelSupportsInboundLoading\(panel\)\) \{/);
+  assert.match(source, /Loading inbounds\.\.\./);
+  assert.match(source, /Failed to load inbounds/);
+  assert.match(source, /This panel has no selectable inbounds yet\./);
+  assert.match(source, /Please wait for inbounds to load\./);
+  assert.match(source, /Select an inbound before creating the VPN account\./);
+  assert.match(source, /Select an inbound before saving the VPN account\./);
 });
 
 test("a superadmin cannot delete itself", async () => {

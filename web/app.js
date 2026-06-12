@@ -1093,8 +1093,7 @@ function createUserAdvancedModalBody() {
 
 function createUserInboundField() {
   const panel = state.data?.panels?.find((item) => item.id === state.createUserPanelId);
-  const isMarzban = panel?.type === "marzban";
-  if (!isMarzban) {
+  if (!panelSupportsInboundLoading(panel)) {
     return `<label>Inbound<input name="inboundId" placeholder="default" value="${esc(state.createUserInboundId || "")}" /></label>`;
   }
   return renderMarzbanInboundPicker({
@@ -1194,6 +1193,10 @@ function groupMarzbanInbounds(inbounds) {
   }, {});
 }
 
+function panelSupportsInboundLoading(panel) {
+  return Boolean(panel?.capabilities?.canListInbounds);
+}
+
 function normalMarzbanInboundIds(inbounds) {
   return (inbounds || []).map((inbound) => inbound.id);
 }
@@ -1220,7 +1223,7 @@ function normalizeDateInputValue(value) {
 
 function renderMarzbanInboundPicker({ title, inbounds, selectedIds, loading, error, emptyMessage, toggleAction, selectAllAction, clearAction }) {
   if (loading) {
-    return `<p class="muted">Loading Marzban inbounds...</p>`;
+    return `<p class="muted">Loading inbounds...</p>`;
   }
   if (error) {
     return `<p class="alert danger">${esc(error)}</p>`;
@@ -1320,7 +1323,7 @@ function editUserProtocolsField() {
   if (state.editUserInboundsLoading) {
     return `
       <div class="compact-panel protocols-panel">
-        <p class="muted">Loading Marzban configs...</p>
+        <p class="muted">Loading inbounds...</p>
       </div>
     `;
   }
@@ -1499,7 +1502,7 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
     refreshCreateUserError();
     return;
   }
-  if (panel.type !== "marzban") {
+  if (!panelSupportsInboundLoading(panel)) {
     state.createUserInbounds = [];
     state.createUserInboundsError = "";
     state.createUserInboundsLoading = false;
@@ -1520,12 +1523,12 @@ async function loadUserInbounds(panelId, { silent = false } = {}) {
     state.createUserInbounds = rows;
     state.createUserInboundIds = normalMarzbanInboundIds(rows);
     state.createUserInboundId = preferredMarzbanInboundId(state.createUserInboundIds);
-    state.createUserInboundsError = state.createUserInboundIds.length > 0 ? "" : "This Marzban panel has no selectable real inbounds yet.";
+    state.createUserInboundsError = state.createUserInboundIds.length > 0 ? "" : "This panel has no selectable inbounds yet.";
   } catch (error) {
     state.createUserInbounds = [];
     state.createUserInboundId = "";
     state.createUserInboundIds = [];
-    state.createUserInboundsError = error.message || "Failed to load Marzban inbounds";
+    state.createUserInboundsError = error.message || "Failed to load inbounds";
   } finally {
     state.createUserInboundsLoading = false;
     refreshUserInboundField();
@@ -1632,9 +1635,9 @@ async function createUser(event) {
     if (!panel) {
       throw new Error("Valid panelId is required");
     }
-    if (isSuperadminUser && panel?.type === "marzban") {
+    if (isSuperadminUser && panelSupportsInboundLoading(panel)) {
       if (state.createUserInboundsLoading) {
-        throw new Error("Please wait for Marzban inbounds to load.");
+        throw new Error("Please wait for inbounds to load.");
       }
       const selectableInbounds = state.createUserInbounds;
       const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
@@ -1642,7 +1645,7 @@ async function createUser(event) {
         .map((id) => selectableInbounds.find((inbound) => inbound.id === id))
         .filter(Boolean);
       if (!selectedInbounds.length) {
-        throw new Error("Select a Marzban inbound before creating the VPN account.");
+        throw new Error("Select an inbound before creating the VPN account.");
       }
       const expiresAt = resolveCreateUserExpiry(form);
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
@@ -1709,7 +1712,7 @@ function showEditUserForm(id) {
   const panel = state.data?.panels?.find((item) => item.id === user.panelId);
   const advanced = isSuperadmin();
   state.editUserInbounds = [];
-  state.editUserInboundsLoading = advanced && panel?.type === "marzban";
+  state.editUserInboundsLoading = advanced && panelSupportsInboundLoading(panel);
   state.editUserInboundsError = "";
   state.editUserInboundIds = Array.isArray(user.inboundIds) && user.inboundIds.length
     ? user.inboundIds.filter((value) => typeof value === "string" && value.trim())
@@ -1723,7 +1726,7 @@ function showEditUserForm(id) {
   state.editUserProtocolOpen = "";
   state.editUserError = "";
   modal(editUserModalTitle(), editUserModalBody());
-  if (advanced && panel?.type === "marzban") {
+  if (advanced && panelSupportsInboundLoading(panel)) {
     void loadEditUserInbounds(user.id, user.panelId, { silent: true });
   } else {
     state.editUserInboundsLoading = false;
@@ -1774,7 +1777,6 @@ function editUserSimpleModalBody() {
 
 function editUserAdvancedModalBody() {
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
-  const isMarzban = panel?.type === "marzban";
   return `
     <form class="form edit-user-form" onsubmit="window.Aegis.saveEditUser(event)">
       <div class="edit-user-main">
@@ -1801,7 +1803,7 @@ function editUserAdvancedModalBody() {
           </span>
         </label>
       </div>
-      <div class="edit-user-side" id="edit-user-inbound-field">${isMarzban ? editUserInboundField() : `<div class="compact-panel"><div class="card-head compact-head"><h4>Protocols</h4></div><label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label></div>`}</div>
+      <div class="edit-user-side" id="edit-user-inbound-field">${editUserInboundField()}</div>
       <div class="edit-user-footer">
         <div id="edit-user-error">${state.editUserError ? `<p class="alert danger">${esc(state.editUserError)}</p>` : ""}</div>
         <button class="primary" type="submit">${saveUserLabel()}</button>
@@ -1812,7 +1814,7 @@ function editUserAdvancedModalBody() {
 
 function editUserInboundField() {
   const panel = state.data?.panels?.find((item) => item.id === state.editUserPanelId);
-  if (panel?.type !== "marzban") {
+  if (!panelSupportsInboundLoading(panel)) {
     return `<div class="compact-panel"><div class="card-head compact-head"><h4>Protocols</h4></div><label>Inbound<input name="inboundId" value="${esc(state.editUserInboundId || "")}" /></label></div>`;
   }
   return editUserProtocolsField();
@@ -1944,7 +1946,7 @@ async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
     refreshEditUserError();
     return;
   }
-  if (panel.type !== "marzban") {
+  if (!panelSupportsInboundLoading(panel)) {
     const user = state.users?.find((item) => item.id === userId);
     state.editUserInbounds = [];
     state.editUserInboundsError = "";
@@ -1972,7 +1974,7 @@ async function loadEditUserInbounds(userId, panelId, { silent = false } = {}) {
     state.editUserInbounds = [];
     state.editUserInboundIds = [];
     state.editUserInboundId = "";
-    state.editUserInboundsError = error.message || "Failed to load Marzban inbounds";
+    state.editUserInboundsError = error.message || "Failed to load inbounds";
   } finally {
     state.editUserInboundsLoading = false;
     refreshEditUserInboundField();
@@ -1991,9 +1993,9 @@ async function saveEditUser(event) {
   refreshEditUserError();
   try {
     if (!user) throw new Error("User not found");
-    if (advanced && panel?.type === "marzban") {
+    if (advanced && panelSupportsInboundLoading(panel)) {
       if (state.editUserInboundsLoading) {
-        throw new Error("Please wait for Marzban inbounds to load.");
+        throw new Error("Please wait for inbounds to load.");
       }
       const selectableInbounds = state.editUserInbounds;
       const selectableInboundIds = selectableInbounds.map((inbound) => inbound.id);
@@ -2001,7 +2003,7 @@ async function saveEditUser(event) {
         .map((id) => selectableInbounds.find((inbound) => inbound.id === id))
         .filter(Boolean);
       if (!selectedInbounds.length) {
-        throw new Error("Select a Marzban inbound before saving the VPN account.");
+        throw new Error("Select an inbound before saving the VPN account.");
       }
       const inboundIds = selectedInbounds.map((inbound) => inbound.id);
       const expiresAt = resolveEditUserExpiry(form);
