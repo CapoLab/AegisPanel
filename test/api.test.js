@@ -3183,7 +3183,7 @@ test("non-marzban panels return not implemented for single-user traffic sync", a
         session: login.session
       });
       assert.equal(res.statusCode, 501);
-      assert.match(res.json.error, /Traffic sync is only implemented for Marzban panels/i);
+      assert.match(res.json.error, /Single-user traffic sync is not available for this panel type yet/i);
     }
   );
 });
@@ -6699,7 +6699,7 @@ test("non-marzban panels fail clearly for real inbounds", async () => {
         session: login.session
       });
       assert.equal(res.statusCode, 501);
-      assert.match(res.json.error, /Real inbounds are only implemented for Marzban panels/i);
+      assert.match(res.json.error, /Real inbounds are not available for this panel type yet/i);
     }
   );
 });
@@ -7845,6 +7845,477 @@ test("three-x-ui deleteUser treats missing clients as success", async () => {
       assert.equal("password" in result, false);
     }
   );
+});
+
+test("superadmin can fetch normalized three-x-ui inbounds through the api", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          username: "admin",
+          secret: "secret"
+        }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({ success: true, msg: "ok" }, { status: 200, headers: { "set-cookie": "_xui_session=session123; Path=/; HttpOnly" } }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              {
+                id: 1,
+                remark: "VLESS 443",
+                protocol: "vless",
+                port: 443,
+                enable: true,
+                streamSettings: { network: "ws", security: "tls" }
+              },
+              {
+                id: 2,
+                tag: "VMess 80",
+                protocol: "vmess",
+                port: 80,
+                enabled: false,
+                network: "tcp",
+                tls: ""
+              }
+            ]
+          })
+        ],
+        calls,
+        async () => {
+          const inbounds = await callApi(handleApi, {
+            method: "GET",
+            pathname: `/api/superadmin/panels/${panel.id}/inbounds`,
+            session: login.session
+          });
+          assert.deepEqual(inbounds, [
+            {
+              id: "1",
+              label: "VLESS 443",
+              protocol: "vless",
+              network: "ws",
+              tls: "tls",
+              port: 443,
+              enabled: true
+            },
+            {
+              id: "2",
+              label: "VMess 80",
+              protocol: "vmess",
+              network: "tcp",
+              tls: "",
+              port: 80,
+              enabled: false
+            }
+          ]);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+});
+
+test("reseller create through a three-x-ui panel stores a safe subscriptionUrl", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          apiKey: "panel-token"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller",
+          password: "reseller-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              { id: 11, remark: "VLESS 443", protocol: "vless", port: 443, enable: true },
+              { id: 12, remark: "VMess 80", protocol: "vmess", port: 80, enable: true }
+            ]
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: {
+                id: 94,
+                email: "three-user",
+                subId: "sub-123",
+                enable: true
+              },
+              inboundIds: [11, 12],
+              links: ["vless://raw.example.com:443?path=%2F"]
+            }
+          })
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "three-user",
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "three-ui customer"
+            }
+          });
+          assert.equal(created.username, "three-user");
+          assert.equal(created.subscriptionId, "sub-123");
+          assert.equal(created.subscriptionUrl, "https://prefix.example.com/sub/sub-123");
+          assert.equal(created.inboundMode, "all");
+          assert.deepEqual(created.inboundIds, ["11", "12"]);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session
+          });
+          const stored = users.find((user) => user.username === "three-user");
+          assert.equal(stored.subscriptionUrl, "https://prefix.example.com/sub/sub-123");
+          assert.equal(stored.ownerUsername, reseller.username);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  const createBody = JSON.parse(calls[1].options.body);
+  assert.deepEqual(createBody.inboundIds, [11, 12]);
+  assert.equal(createBody.client.email, "three-user");
+});
+
+test("reseller update, sync, and delete through three-x-ui call the adapter and preserve quota safety", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          apiKey: "panel-token"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-update",
+          password: "reseller-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              { id: 21, remark: "VLESS 443", protocol: "vless", port: 443, enable: true },
+              { id: 22, remark: "VMess 80", protocol: "vmess", port: 80, enable: true }
+            ]
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: { id: 95, email: "three-user-update", subId: "sub-321", enable: true },
+              inboundIds: [21, 22]
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: { id: 95, email: "three-user-update", subId: "sub-321", enable: true }
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: { id: 95, email: "three-user-update", subId: "sub-321", enable: true }
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 120,
+              down: 30
+            }
+          })
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "three-user-update",
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "update me"
+            }
+          });
+          const updated = await callApi(handleApi, {
+            method: "PUT",
+            pathname: `/api/admin/users/${created.id}`,
+            session: resellerLogin.session,
+            body: {
+              limitBytes: 300,
+              note: "updated note"
+            }
+          });
+          assert.equal(updated.limitBytes, 300);
+          assert.equal(updated.reservedBytes, 300);
+
+          const synced = await callApi(handleApi, {
+            method: "POST",
+            pathname: `/api/admin/users/${created.id}/sync-traffic`,
+            session: resellerLogin.session
+          });
+          assert.equal(synced.usedBytes, 150);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const storedReseller = admins.find((admin) => admin.username === reseller.username);
+          assert.equal(storedReseller.trafficRemainingBytes, 700);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/three-user-update");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-update");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-update");
+});
+
+test("reseller delete through a three-x-ui panel calls the adapter before local removal", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          apiKey: "panel-token"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-delete",
+          password: "reseller-pass",
+          panelId: panel.id,
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: [
+              { id: 31, remark: "VLESS 443", protocol: "vless", port: 443, enable: true }
+            ]
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: {
+                id: 96,
+                email: "three-user-delete",
+                subId: "sub-delete",
+                enable: true
+              },
+              inboundIds: [31]
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: {
+                id: 96,
+                email: "three-user-delete",
+                subId: "sub-delete",
+                enable: true
+              }
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 0,
+              down: 0
+            }
+          }),
+          createFetchResponse({ success: true, msg: "ok" })
+        ],
+        calls,
+        async () => {
+          const created = await callApi(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "three-user-delete",
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "delete me"
+            }
+          });
+
+          const deleted = await callApi(handleApi, {
+            method: "DELETE",
+            pathname: `/api/admin/users/${created.id}`,
+            session: resellerLogin.session
+          });
+          assert.equal(deleted.ok, true);
+
+          const afterDeleteUsers = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session
+          });
+          assert.equal(afterDeleteUsers.some((user) => user.username === "three-user-delete"), false);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const storedReseller = admins.find((admin) => admin.username === reseller.username);
+          assert.equal(storedReseller.trafficRemainingBytes, 1000);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/list");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-delete");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/del/three-user-delete");
 });
 
 test("skeleton adapters fail clearly on contract methods", async () => {

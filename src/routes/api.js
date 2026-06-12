@@ -108,6 +108,10 @@ function editablePanel(panel) {
   return safe;
 }
 
+function adapterSupports(adapter, capability, methodName) {
+  return Boolean(adapter?.capabilities?.[capability] && typeof adapter?.[methodName] === "function");
+}
+
 function normalizeInboundSearchText(value) {
   if (value == null) return "";
   const normalized = String(value);
@@ -219,11 +223,11 @@ async function hydrateSubscriptionUrlForUser(actor, user) {
     return user;
   }
   const panel = store.find("panels", user.panelId);
-  if (!panel || panel.type !== "marzban") {
+  if (!panel) {
     return user;
   }
   const adapter = adapterFor(panel.type);
-  if (!adapter || typeof adapter.getUser !== "function") {
+  if (!adapterSupports(adapter, "canGetUser", "getUser")) {
     return user;
   }
   try {
@@ -303,22 +307,20 @@ function canDeleteAdmin(actor, targetAdmin, superadminCount) {
 
 async function deleteUsersOwnedByAdmin(actor, targetAdmin) {
   const ownedUsers = store.list("users").filter((user) => user.ownerAdminId === targetAdmin.id);
-  const marzbanFailures = [];
+  const remoteDeleteFailures = [];
   for (const user of ownedUsers) {
     const panel = store.find("panels", user.panelId);
-    if (panel?.type !== "marzban") continue;
-    const adapter = adapterFor(panel.type);
-    if (!adapter || typeof adapter.deleteUser !== "function") {
-      marzbanFailures.push(user.id);
+    const adapter = adapterFor(panel?.type);
+    if (!panel || !adapterSupports(adapter, "canDeleteUser", "deleteUser")) {
       continue;
     }
     try {
       await adapter.deleteUser(panel, user);
     } catch {
-      marzbanFailures.push(user.id);
+      remoteDeleteFailures.push(user.id);
     }
   }
-  if (marzbanFailures.length > 0) {
+  if (remoteDeleteFailures.length > 0) {
     const error = new Error("Cannot delete reseller because one or more remote users could not be deleted.");
     error.status = 502;
     throw error;
@@ -731,11 +733,8 @@ export async function handleApi(req, res, route) {
     requireAuth(req, "superadmin");
     const panel = store.find("panels", inbounds.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
-    if (panel.type !== "marzban") {
-      return sendJson(res, 501, { ok: false, error: "Real inbounds are only implemented for Marzban panels" });
-    }
     const adapter = adapterFor(panel.type);
-    if (!adapter || typeof adapter.listInbounds !== "function") {
+    if (!adapterSupports(adapter, "canListInbounds", "listInbounds")) {
       return sendJson(res, 501, { ok: false, error: "Real inbounds are not available for this panel type yet" });
     }
     return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
@@ -790,11 +789,8 @@ export async function handleApi(req, res, route) {
     requireAuth(req, "superadmin");
     const panel = store.find("panels", scopedInbounds.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
-    if (panel.type !== "marzban") {
-      return sendJson(res, 501, { ok: false, error: "Real inbounds are only implemented for Marzban panels" });
-    }
     const adapter = adapterFor(panel.type);
-    if (!adapter || typeof adapter.listInbounds !== "function") {
+    if (!adapterSupports(adapter, "canListInbounds", "listInbounds")) {
       return sendJson(res, 501, { ok: false, error: "Real inbounds are not available for this panel type yet" });
     }
     return sendJson(res, 200, { ok: true, data: await adapter.listInbounds(panel) });
@@ -842,17 +838,20 @@ export async function handleApi(req, res, route) {
     const owner = store.find("admins", actor.role === "superadmin" ? body.ownerAdminId || actor.id : actor.id);
     if (!owner) return sendJson(res, 400, { ok: false, error: "Valid ownerAdminId is required" });
     const adapter = adapterFor(panel.type);
-    const resellerMarzbanInbounds = actor.role === "admin" && panel.type === "marzban";
+    const canListInbounds = adapterSupports(adapter, "canListInbounds", "listInbounds");
+    const canCreateUser = adapterSupports(adapter, "canCreateUser", "createUser");
     let resolvedInboundIds = selectedInboundIdsFromBody(body);
-    if (resellerMarzbanInbounds) {
-      if (!adapter || typeof adapter.listInbounds !== "function") {
-        return sendJson(res, 501, { ok: false, error: "Real inbound defaults are not available for this panel type yet" });
-      }
+    let usingAdapterInboundDefaults = false;
+    if (canListInbounds && (actor.role === "admin" || resolvedInboundIds.length === 0)) {
       const rows = await adapter.listInbounds(panel);
-      resolvedInboundIds = rows.map((row) => row.id).filter((value) => typeof value === "string" && value.trim());
+      const availableInboundIds = rows.map((row) => row.id).filter((value) => typeof value === "string" && value.trim());
+      if (resolvedInboundIds.length === 0 || actor.role === "admin") {
+        resolvedInboundIds = availableInboundIds;
+        usingAdapterInboundDefaults = true;
+      }
     }
-    if (resellerMarzbanInbounds && resolvedInboundIds.length === 0) {
-      return sendJson(res, 400, { ok: false, error: "No Marzban inbounds available for this panel" });
+    if (canListInbounds && resolvedInboundIds.length === 0) {
+      return sendJson(res, 400, { ok: false, error: "No inbounds available for this panel" });
     }
     const ownerRemainingBytes = finiteQuotaBytes(owner?.trafficRemainingBytes);
     if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
@@ -872,7 +871,7 @@ export async function handleApi(req, res, route) {
       subscriptionId: body.subscriptionId || null,
       subscriptionUrl: null,
       inboundId: primaryInboundId,
-      inboundMode: resellerMarzbanInbounds ? "all" : normalizeInboundMode(body.inboundMode),
+      inboundMode: usingAdapterInboundDefaults ? "all" : normalizeInboundMode(body.inboundMode),
       flow: actor.role === "superadmin" ? body.flow || "" : "",
       note: body.note || "",
       active: body.active !== false,
@@ -881,17 +880,15 @@ export async function handleApi(req, res, route) {
       reservedBytes: requestedLimitBytes,
       expiresAt
     };
-    if (resellerMarzbanInbounds) {
-      userRecord.inboundIds = resolvedInboundIds;
-    } else if (resolvedInboundIds.length > 0) {
+    if (resolvedInboundIds.length > 0) {
       userRecord.inboundIds = resolvedInboundIds;
     }
     const user = store.insert("users", {
       ...userRecord
     });
     let createdUser = user;
-    if (panel.type === "marzban") {
-      if (!adapter || typeof adapter.createUser !== "function") {
+    if (canCreateUser) {
+      if (!adapter) {
         if (requestedLimitBytes > 0 && ownerRemainingBytes !== null) {
           store.update("admins", owner.id, {
             trafficRemainingBytes: ownerRemainingBytes
@@ -907,7 +904,7 @@ export async function handleApi(req, res, route) {
           expiresAt
         });
         let subscriptionUrl = typeof remoteUser?.subscriptionUrl === "string" ? remoteUser.subscriptionUrl.trim() : "";
-        if (!subscriptionUrl && typeof adapter.getUser === "function") {
+        if (!subscriptionUrl && adapterSupports(adapter, "canGetUser", "getUser")) {
           try {
             const refreshedUser = await adapter.getUser(panel, {
               username: remoteUser?.username ?? user.username,
@@ -937,7 +934,7 @@ export async function handleApi(req, res, route) {
         store.remove("users", user.id);
         return sendJson(res, error.status || 502, {
           ok: false,
-          error: error.message || "Marzban user creation failed"
+          error: error.message || (panel.type === "marzban" ? "Marzban user creation failed" : "User creation failed")
         });
       }
     }
@@ -1002,17 +999,22 @@ export async function handleApi(req, res, route) {
       delete updatePatch.ownerAdminId;
       delete updatePatch.usedBytes;
     }
-    if (panel?.type === "marzban") {
-      const adapter = adapterFor(panel.type);
-      if (!adapter || typeof adapter.updateUser !== "function") {
-        return sendJson(res, 501, { ok: false, error: "Real user update is not available for this panel type yet" });
-      }
+    const adapter = adapterFor(panel?.type);
+    if (adapterSupports(adapter, "canUpdateUser", "updateUser")) {
       try {
-        await adapter.updateUser(panel, user, updatePatch);
+        const remoteUser = await adapter.updateUser(panel, user, updatePatch);
+        const remotePatch = {};
+        const remoteSubscriptionId = typeof remoteUser?.subscriptionId === "string" ? remoteUser.subscriptionId.trim() : "";
+        const remoteSubscriptionUrl = isPublicSubscriptionUrl(remoteUser?.subscriptionUrl) ? remoteUser.subscriptionUrl.trim() : "";
+        if (remoteSubscriptionId && !user.subscriptionId) remotePatch.subscriptionId = remoteSubscriptionId;
+        if (remoteSubscriptionUrl) remotePatch.subscriptionUrl = remoteSubscriptionUrl;
+        if (Object.keys(remotePatch).length > 0) {
+          Object.assign(updatePatch, remotePatch);
+        }
       } catch (error) {
         return sendJson(res, error.status || 502, {
           ok: false,
-          error: error.message || "Marzban user update failed"
+          error: error.message || (panel?.type === "marzban" ? "Marzban user update failed" : "User update failed")
         });
       }
     }
@@ -1033,11 +1035,8 @@ export async function handleApi(req, res, route) {
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const panel = store.find("panels", user.panelId);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
-    if (panel.type !== "marzban") {
-      return sendJson(res, 501, { ok: false, error: "Traffic sync is only implemented for Marzban panels" });
-    }
     const adapter = adapterFor(panel.type);
-    if (!adapter || typeof adapter.syncUserTraffic !== "function") {
+    if (!adapterSupports(adapter, "canSyncTraffic", "syncUserTraffic")) {
       return sendJson(res, 501, { ok: false, error: "Single-user traffic sync is not available for this panel type yet" });
     }
     try {
@@ -1059,7 +1058,7 @@ export async function handleApi(req, res, route) {
     } catch (error) {
       return sendJson(res, error.status || 502, {
         ok: false,
-        error: error.message || "Marzban traffic sync failed"
+        error: error.message || (panel.type === "marzban" ? "Marzban traffic sync failed" : "Traffic sync failed")
       });
     }
   }
@@ -1069,26 +1068,25 @@ export async function handleApi(req, res, route) {
     if (!user) return sendJson(res, 404, { ok: false, error: "User not found" });
     const panel = store.find("panels", user.panelId);
     let usedBytesForReturn = finiteQuotaBytes(user.usedBytes) ?? 0;
-    if (panel?.type === "marzban") {
-      const adapter = adapterFor(panel.type);
-      if (!adapter || typeof adapter.deleteUser !== "function" || typeof adapter.getUser !== "function") {
-        return sendJson(res, 501, { ok: false, error: "Real user deletion is not available for this panel type yet" });
-      }
+    const adapter = adapterFor(panel?.type);
+    if (panel && adapterSupports(adapter, "canGetUser", "getUser")) {
       try {
         const remoteUser = await adapter.getUser(panel, user);
         usedBytesForReturn = finiteQuotaBytes(remoteUser?.usedBytes) ?? usedBytesForReturn;
       } catch (error) {
         return sendJson(res, error.status || 502, {
           ok: false,
-          error: error.message || "Marzban user lookup failed"
+          error: error.message || (panel?.type === "marzban" ? "Marzban user lookup failed" : "User lookup failed")
         });
       }
+    }
+    if (panel && adapterSupports(adapter, "canDeleteUser", "deleteUser")) {
       try {
         await adapter.deleteUser(panel, user);
       } catch (error) {
         return sendJson(res, error.status || 502, {
           ok: false,
-          error: error.message || "Marzban user deletion failed"
+          error: error.message || (panel?.type === "marzban" ? "Marzban user deletion failed" : "User deletion failed")
         });
       }
     }
