@@ -746,26 +746,27 @@ export async function handleApi(req, res, route) {
     const superadmin = requireAuth(req, "superadmin");
     const panel = store.find("panels", testConnection.id);
     if (!panel) return sendJson(res, 404, { ok: false, error: "Panel not found" });
-    if (panel.type !== "marzban") {
-      return sendJson(res, 501, { ok: false, error: "Connection testing is not available for this panel type yet" });
-    }
     const adapter = adapterFor(panel.type);
-    if (!adapter || typeof adapter.listInbounds !== "function") {
+    if (!adapter || typeof adapter.testConnection !== "function") {
       return sendJson(res, 501, { ok: false, error: "Connection testing is not available for this panel type yet" });
     }
     try {
-      const inbounds = await adapter.listInbounds(panel);
-      const checkedAt = new Date().toISOString();
+      const result = await adapter.testConnection(panel);
+      const inboundCount = Number.isFinite(result?.inboundCount) && result.inboundCount >= 0 ? result.inboundCount : 0;
+      const checkedAt = typeof result?.checkedAt === "string" && result.checkedAt.trim() ? result.checkedAt.trim() : new Date().toISOString();
+      const message = typeof result?.message === "string" && result.message.trim()
+        ? result.message.trim()
+        : `Connection OK: ${inboundCount} inbounds`;
       const data = {
         ok: true,
         panelId: panel.id,
         type: panel.type,
-        message: `Connection OK: ${inbounds.length} inbounds`,
-        inboundCount: inbounds.length,
+        message,
+        inboundCount,
         checkedAt
       };
       store.audit(superadmin, "panel.testConnection", panel.id, {
-        inboundCount: inbounds.length,
+        inboundCount,
         checkedAt
       });
       return sendJson(res, 200, { ok: true, data });

@@ -2,42 +2,78 @@ import { marzbanAdapter } from "./marzban.js";
 
 const supported = new Map();
 
+function capabilityFlags(flags = {}) {
+  return {
+    canTestConnection: Boolean(flags.canTestConnection),
+    canListInbounds: Boolean(flags.canListInbounds),
+    canCreateUser: Boolean(flags.canCreateUser),
+    canUpdateUser: Boolean(flags.canUpdateUser),
+    canDeleteUser: Boolean(flags.canDeleteUser),
+    canSyncTraffic: Boolean(flags.canSyncTraffic),
+    canBuildSubscriptionUrl: Boolean(flags.canBuildSubscriptionUrl),
+    canGetUser: Boolean(flags.canGetUser)
+  };
+}
+
+function notImplemented(type, method) {
+  const error = new Error(`${type} ${method} is not implemented yet`);
+  error.status = 501;
+  return error;
+}
+
 function makeAdapter(type, label, capabilities) {
+  const contract = capabilityFlags(capabilities);
   return {
     type,
     label,
-    capabilities,
-    async health(panel) {
-      return {
-        ok: Boolean(panel.url),
-        latencyMs: 0,
-        message: panel.url ? "Connector configured" : "Panel URL is missing"
-      };
+    capabilities: contract,
+    async health() {
+      throw notImplemented(type, "health");
+    },
+    async testConnection() {
+      throw notImplemented(type, "testConnection");
+    },
+    async buildClient() {
+      throw notImplemented(type, "buildClient");
+    },
+    async authenticate() {
+      throw notImplemented(type, "authenticate");
     },
     async listInbounds() {
-      return [
-        { id: "default", label: "Default inbound", flow: "", protocol: "mixed" }
-      ];
+      throw notImplemented(type, "listInbounds");
     },
-    async listUsers(panel, users) {
-      return users.filter((user) => user.panelId === panel.id);
+    async listUsers() {
+      throw notImplemented(type, "listUsers");
     },
-    async sync(panel, users) {
-      return {
-        panelId: panel.id,
-        pulled: users.filter((user) => user.panelId === panel.id).length,
-        pushed: 0,
-        conflicts: []
-      };
+    async createUser() {
+      throw notImplemented(type, "createUser");
+    },
+    async updateUser() {
+      throw notImplemented(type, "updateUser");
+    },
+    async deleteUser() {
+      throw notImplemented(type, "deleteUser");
+    },
+    async getUser() {
+      throw notImplemented(type, "getUser");
+    },
+    async syncUserTraffic() {
+      throw notImplemented(type, "syncUserTraffic");
+    },
+    async buildSubscriptionUrl() {
+      throw notImplemented(type, "buildSubscriptionUrl");
+    },
+    async sync() {
+      throw notImplemented(type, "sync");
     }
   };
 }
 
 [
-  ["three-x-ui", "3x-ui", ["api-key auth", "inbounds", "traffic-sync", "subscription-links"]],
-  ["tx-ui", "Tx-ui", ["password-auth", "inbounds", "traffic-sync"]],
-  ["guard", "Guard", ["api-key auth", "guard-users", "traffic-sync"]],
-  ["s-ui", "S-ui", ["password-auth", "inbounds", "traffic-sync"]]
+  ["three-x-ui", "3x-ui"],
+  ["tx-ui", "Tx-ui"],
+  ["guard", "Guard"],
+  ["s-ui", "S-ui"]
 ].forEach(([type, label, capabilities]) => supported.set(type, makeAdapter(type, label, capabilities)));
 
 supported.set("marzban", marzbanAdapter);

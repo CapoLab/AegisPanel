@@ -165,6 +165,10 @@ function extractSubscriptionUrl(payload, panel, user = null) {
   return buildFallbackSubscriptionUrl(panel, extractSubscriptionIdentifier(payload, user ?? payload));
 }
 
+export function buildSubscriptionUrl(panel, remoteUser, localUser = remoteUser) {
+  return extractSubscriptionUrl(remoteUser ?? localUser ?? {}, panel, localUser ?? remoteUser ?? {});
+}
+
 export function buildClient(panel) {
   const baseUrl = normalizeBaseUrl(panel?.url);
   const username = readCredential(panel, ["username"]);
@@ -398,12 +402,36 @@ export async function syncUserTraffic(panel, user) {
   return getUser(panel, user);
 }
 
+export async function testConnection(panel) {
+  const inbounds = await listInbounds(panel);
+  return {
+    ok: true,
+    panelId: panel?.id ?? null,
+    type: "marzban",
+    message: `Connection OK: ${inbounds.length} inbounds`,
+    inboundCount: inbounds.length,
+    checkedAt: new Date().toISOString()
+  };
+}
+
 export const marzbanAdapter = {
   type: "marzban",
   label: "Marzban",
-  capabilities: ["password-auth", "multi-inbound", "data-limit", "status-sync"],
+  capabilities: {
+    canTestConnection: true,
+    canListInbounds: true,
+    canCreateUser: true,
+    canUpdateUser: true,
+    canDeleteUser: true,
+    canSyncTraffic: true,
+    canBuildSubscriptionUrl: true,
+    canGetUser: true
+  },
   async health() {
     reject("health");
+  },
+  async testConnection(panel) {
+    return testConnection(panel);
   },
   async buildClient(panel) {
     return buildClient(panel);
@@ -431,6 +459,9 @@ export const marzbanAdapter = {
   },
   async syncUserTraffic(panel, user) {
     return syncUserTraffic(panel, user);
+  },
+  async buildSubscriptionUrl(panel, remoteUser, localUser) {
+    return buildSubscriptionUrl(panel, remoteUser, localUser);
   },
   async sync() {
     reject("sync");

@@ -7453,7 +7453,48 @@ test("signed sessions round-trip and expose role claims", () => {
 });
 
 test("all planned panel adapters are registered", () => {
-  const types = supportedPanels().map((panel) => panel.type).sort();
+  const panels = supportedPanels();
+  const types = panels.map((panel) => panel.type).sort();
   assert.deepEqual(types, ["guard", "marzban", "s-ui", "three-x-ui", "tx-ui"]);
+  for (const panel of panels) {
+    assert.equal(typeof panel.type, "string");
+    assert.equal(typeof panel.label, "string");
+    assert.equal(typeof panel.capabilities, "object");
+    assert.equal("secret" in panel, false);
+    assert.equal("apiKey" in panel, false);
+    assert.equal("password" in panel, false);
+    assert.equal("token" in panel, false);
+    assert.equal("credentials" in panel, false);
+  }
   assert.equal(adapterFor("marzban").label, "Marzban");
+  assert.deepEqual(adapterFor("marzban").capabilities, {
+    canTestConnection: true,
+    canListInbounds: true,
+    canCreateUser: true,
+    canUpdateUser: true,
+    canDeleteUser: true,
+    canSyncTraffic: true,
+    canBuildSubscriptionUrl: true,
+    canGetUser: true
+  });
+});
+
+test("skeleton adapters fail clearly on contract methods", async () => {
+  const adapter = adapterFor("s-ui");
+  assert.equal(typeof adapter.testConnection, "function");
+  assert.equal(typeof adapter.listInbounds, "function");
+  assert.equal(typeof adapter.createUser, "function");
+  assert.equal(typeof adapter.updateUser, "function");
+  assert.equal(typeof adapter.deleteUser, "function");
+  assert.equal(typeof adapter.getUser, "function");
+  assert.equal(typeof adapter.syncUserTraffic, "function");
+  assert.equal(typeof adapter.buildSubscriptionUrl, "function");
+  await assert.rejects(adapter.testConnection({}), /s-ui testConnection is not implemented yet/);
+  await assert.rejects(adapter.listInbounds({}), /s-ui listInbounds is not implemented yet/);
+  await assert.rejects(adapter.createUser({}, {}), /s-ui createUser is not implemented yet/);
+  await assert.rejects(adapter.updateUser({}, {}, {}), /s-ui updateUser is not implemented yet/);
+  await assert.rejects(adapter.deleteUser({}, {}), /s-ui deleteUser is not implemented yet/);
+  await assert.rejects(adapter.getUser({}, {}), /s-ui getUser is not implemented yet/);
+  await assert.rejects(adapter.syncUserTraffic({}, {}), /s-ui syncUserTraffic is not implemented yet/);
+  await assert.rejects(adapter.buildSubscriptionUrl({}, {}, {}), /s-ui buildSubscriptionUrl is not implemented yet/);
 });
