@@ -328,30 +328,22 @@ async function load() {
 function renderLogin() {
   app.innerHTML = `
     <section class="login-page">
-      <div class="login-art">
-        <div class="login-badge">AP</div>
-        <p class="eyebrow">Operator console</p>
-        <h1>AegisPanel</h1>
-        <p>Secure access for operators, reseller workflows, traffic accounting, and panel operations.</p>
-      </div>
-      <form class="login-card form" onsubmit="window.Aegis.login(event)">
-        <div class="brand compact">
-          <div class="mark">A</div>
-          <div>
-            <strong>AegisPanel</strong>
-            <span>Admin access</span>
+      <main class="login-shell">
+        <form class="login-card form" onsubmit="window.Aegis.login(event)">
+          <div class="login-copy">
+            <h1>Login to your account</h1>
+            <p>Welcome back, please enter your details</p>
           </div>
-        </div>
-        <div class="login-copy">
-          <h2>Sign in</h2>
-          <p>Use your operator credentials to continue.</p>
-        </div>
-        <label>Username<input name="username" autocomplete="username" required /></label>
-        <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
-        ${state.error ? `<p class="alert danger">${esc(state.error)}</p>` : ""}
-        <button class="primary" type="submit">Sign in</button>
-        <p class="muted login-footnote">Environment-backed authentication. Keep deployment credentials private.</p>
-      </form>
+          <label>Username<input name="username" autocomplete="username" required /></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
+          ${state.error ? `<p class="alert danger">${esc(state.error)}</p>` : ""}
+          <button class="primary" type="submit">Sign in</button>
+        </form>
+      </main>
+      <footer class="login-footer">
+        <span>AegisPanel v0.1.0</span>
+        <a href="https://github.com/" target="_blank" rel="noreferrer">GitHub</a>
+      </footer>
     </section>
   `;
 }
