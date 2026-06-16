@@ -8021,15 +8021,20 @@ test("three-x-ui createUser sends the verified payload and builds a subscription
     [
       createFetchResponse({
         success: true,
+        msg: ""
+      }),
+      createFetchResponse({
+        success: true,
+        msg: ""
+      }),
+      createFetchResponse({
+        success: true,
         msg: "",
         obj: {
-          client: {
-            id: 94,
-            email: "alice",
-            subId: "ticket-123",
-            enable: true
-          },
-          inboundIds: [1, 2]
+          id: 94,
+          email: "alice",
+          subId: "ticket-123",
+          enable: true
         }
       })
     ],
@@ -8053,20 +8058,24 @@ test("three-x-ui createUser sends the verified payload and builds a subscription
           subscriptionId: "ticket-123"
         }
       );
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+      assert.equal(calls.length, 4);
+      assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+      assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/alice");
+      assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/alice");
       assert.equal(calls[0].options.method, "POST");
       assert.equal(calls[0].options.headers.authorization, "Bearer panel-token");
       const body = JSON.parse(calls[0].options.body);
-      assert.equal(body.client.email, "alice");
-      assert.equal(typeof body.client.uuid, "string");
-      assert.equal(body.client.subId, "ticket-123");
-      assert.equal(body.client.totalGB, 4294967296);
-      assert.equal(body.client.expiryTime, new Date("2030-01-02T03:04:05.000Z").getTime());
-      assert.equal(body.client.enable, false);
-      assert.equal(body.client.flow, "xtls-rprx-vision");
-      assert.equal(body.client.comment, "demo note");
-      assert.deepEqual(body.inboundIds, [2, 1]);
+      assert.equal(body.id, 2);
+      const settings = JSON.parse(body.settings);
+      assert.equal(settings.clients[0].email, "alice");
+      assert.equal(typeof settings.clients[0].id, "string");
+      assert.equal(settings.clients[0].subId, "ticket-123");
+      assert.equal(settings.clients[0].totalGB, 4294967296);
+      assert.equal(settings.clients[0].expiryTime, new Date("2030-01-02T03:04:05.000Z").getTime());
+      assert.equal(settings.clients[0].enable, false);
+      assert.equal(settings.clients[0].flow, "xtls-rprx-vision");
+      assert.equal(settings.clients[0].comment, "demo note");
       assert.equal(result.subscriptionId, "ticket-123");
       assert.equal(result.subscriptionUrl, "https://prefix.example.com/sub/ticket-123");
     }
@@ -8189,7 +8198,7 @@ test("three-x-ui syncUserTraffic maps traffic and ignores raw config links", asy
       assert.equal(calls.length, 4);
       assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
       assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/alice");
+      assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/alice");
       assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/alice");
       assert.equal(result.usedBytes, 150);
       assert.equal(result.subscriptionId, "ticket-123");
@@ -8537,6 +8546,11 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
           createFetchResponse({
             success: true,
             msg: "",
+            obj: {}
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
             obj: {
               client: {
                 id: 94,
@@ -8546,6 +8560,48 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
               },
               inboundIds: [11, 12],
               links: ["vless://raw.example.com:443?path=%2F"]
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: {
+                id: 94,
+                email: "three-user",
+                subId: "sub-123",
+                enable: true
+              },
+              inboundIds: [11, 12],
+              links: ["vless://raw.example.com:443?path=%2F"]
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 0,
+              down: 0
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: {
+                id: 94,
+                email: "three-user",
+                subId: "sub-123",
+                enable: true
+              }
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 0,
+              down: 0
             }
           })
         ],
@@ -8582,10 +8638,107 @@ test("reseller create through a three-x-ui panel stores a safe subscriptionUrl",
   );
   assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/csrf-token");
   assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/login");
-  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user");
   const createBody = JSON.parse(calls[2].options.body);
-  assert.deepEqual(createBody.inboundIds, [11, 12]);
-  assert.equal(createBody.client.email, "three-user");
+  assert.equal(createBody.id, 11);
+  assert.equal(JSON.parse(createBody.settings).clients[0].email, "three-user");
+});
+
+test("reseller create through a three-x-ui panel rolls back when remote create cannot be verified", async () => {
+  const calls = [];
+  await withTempEnv(
+    {
+      AEGIS_ADMIN_USERNAME: "env-admin",
+      AEGIS_ADMIN_PASSWORD: "env-pass",
+      AEGIS_DATA_DIR: "./tmp-data",
+      AEGIS_SESSION_SECRET: "test-secret"
+    },
+    async () => {
+      const handleApi = await importApiFresh();
+      const login = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: "env-admin", password: "env-pass" }
+      });
+      const panel = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/panels",
+        session: login.session,
+        body: {
+          name: "3x-ui Panel",
+          type: "three-x-ui",
+          url: "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel",
+          subscriptionUrl: "https://prefix.example.com",
+          apiKey: "panel-token"
+        }
+      });
+      const reseller = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/superadmin/admins",
+        session: login.session,
+        body: {
+          username: "three-reseller-unverified",
+          password: "reseller-pass",
+          panelId: panel.id,
+          inboundIds: ["41"],
+          trafficLimitBytes: 1000
+        }
+      });
+      const resellerLogin = await callApi(handleApi, {
+        method: "POST",
+        pathname: "/api/auth/login",
+        body: { username: reseller.username, password: "reseller-pass" }
+      });
+
+      await withMockFetch(
+        [
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              client: { id: 97, email: "three-user-unverified", subId: "sub-unverified", enable: true }
+            }
+          }),
+          createFetchResponse({ success: false, msg: "client not found" }, { status: 200 })
+        ],
+        calls,
+        async () => {
+          const created = await callApiWithOutcome(handleApi, {
+            method: "POST",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session,
+            body: {
+              username: "three-user-unverified",
+              limitBytes: 100,
+              expiresAt: "2030-01-02T23:59:59.000Z",
+              note: "rollback me"
+            }
+          });
+          assert.ok([404, 500, 502].includes(created.statusCode));
+          assert.match(created.json.error, /not found|verified|failed/i);
+
+          const users = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/admin/users",
+            session: resellerLogin.session
+          });
+          assert.equal(users.some((user) => user.username === "three-user-unverified"), false);
+
+          const admins = await callApi(handleApi, {
+            method: "GET",
+            pathname: "/api/superadmin/admins",
+            session: login.session
+          });
+          const storedReseller = admins.find((item) => item.username === reseller.username);
+          assert.equal(storedReseller.trafficRemainingBytes, 1000);
+        }
+      );
+    }
+  );
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user-unverified");
 });
 
 test("reseller create through a three-x-ui panel rolls back local state on remote failure", async () => {
@@ -8670,7 +8823,7 @@ test("reseller create through a three-x-ui panel rolls back local state on remot
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
 });
 
 test("reseller update, sync, and delete through three-x-ui call the adapter and preserve quota safety", async () => {
@@ -8724,9 +8877,27 @@ test("reseller update, sync, and delete through three-x-ui call the adapter and 
           createFetchResponse({
             success: true,
             msg: "",
+            obj: {}
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {}
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
             obj: {
               client: { id: 95, email: "three-user-update", subId: "sub-321", enable: true },
               inboundIds: [21, 22]
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 0,
+              down: 0
             }
           }),
           createFetchResponse({
@@ -8795,10 +8966,13 @@ test("reseller update, sync, and delete through three-x-ui call the adapter and 
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/three-user-update");
-  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-update");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user-update");
   assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-update");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/update/three-user-update");
+  assert.equal(calls[5].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user-update");
+  assert.equal(calls[6].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-update");
 });
 
 test("reseller delete through a three-x-ui panel calls the adapter before local removal", async () => {
@@ -8852,6 +9026,11 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
           createFetchResponse({
             success: true,
             msg: "",
+            obj: {}
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
             obj: {
               client: {
                 id: 96,
@@ -8861,6 +9040,14 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
               },
               inboundIds: [31],
               subscriptionUrl: "https://prefix.example.com/sub/sub-delete"
+            }
+          }),
+          createFetchResponse({
+            success: true,
+            msg: "",
+            obj: {
+              up: 0,
+              down: 0
             }
           }),
           createFetchResponse({
@@ -8924,11 +9111,13 @@ test("reseller delete through a three-x-ui panel calls the adapter before local 
       );
     }
   );
-  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/add");
-  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/get/three-user-delete");
+  assert.equal(calls[0].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/addClient");
+  assert.equal(calls[1].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user-delete");
   assert.equal(calls[2].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
-  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/three-user-delete/detach");
-  assert.deepEqual(JSON.parse(calls[3].options.body), { inboundIds: [31] });
+  assert.equal(calls[3].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/inbounds/getClientTraffics/three-user-delete");
+  assert.equal(calls[4].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/traffic/three-user-delete");
+  assert.equal(calls[5].url, "https://panel.example.com/rabEtXgGAk0JBV0uaC/panel/api/clients/three-user-delete/detach");
+  assert.deepEqual(JSON.parse(calls[5].options.body), { inboundIds: [31] });
 });
 
 test("skeleton adapters fail clearly on contract methods", async () => {

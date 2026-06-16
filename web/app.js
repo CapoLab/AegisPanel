@@ -808,7 +808,7 @@ function modal(title, body) {
 function modalPanel(title, body) {
   const titleLower = String(title).toLowerCase();
   const wide = titleLower.includes("inbounds") || titleLower.includes("audit logs") ? " wide-modal" : "";
-  const compact = titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") || titleLower.includes("edit reseller") ? " edit-modal" : "";
+  const compact = titleLower.includes("create vpn account") || titleLower.includes("create user") || titleLower.includes("edit vpn account") || titleLower.includes("edit user") || titleLower.includes("edit panel") || titleLower.includes("edit reseller") ? " edit-modal" : "";
   return `<section class="modal card${wide}${compact}"><div class="card-head"><h3>${esc(title)}</h3><button class="ghost" onclick="window.Aegis.closeModal()">Close</button></div>${body}</section>`;
 }
 
@@ -1200,48 +1200,62 @@ function createUserModalBody() {
 function createUserSimpleModalBody() {
   return `
     <form class="form create-user-form" onsubmit="window.Aegis.createUser(event)">
-      <label>Username<input name="username" required placeholder="client-name" /></label>
-      <label>Data Limit<div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div></label>
-      <div id="user-expiry-field">${createUserExpiryField()}</div>
-      <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
-      <label class="switch-field">
-        <span>
-          <strong>Status</strong>
-          <small>Active account</small>
-        </span>
-        <span class="switch-control">
-          <input name="active" type="checkbox" checked />
-          <span class="switch-track" aria-hidden="true"></span>
-        </span>
-      </label>
-      <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
-      <button class="primary" type="submit">${createUserLabel()}</button>
+      <div class="create-user-main">
+        <label>Username<input name="username" required placeholder="client-name" /></label>
+        <label class="unit-field">
+          <span>Data Limit</span>
+          <div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div>
+        </label>
+        <div id="user-expiry-field">${createUserExpiryField()}</div>
+        <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>Active account</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+      <div class="create-user-footer">
+        <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
+        <button class="primary" type="submit">${createUserLabel()}</button>
+      </div>
     </form>
   `;
 }
 
 function createUserAdvancedModalBody() {
   return `
-    <form class="form create-user-form" onsubmit="window.Aegis.createUser(event)">
-      <label>Username<input name="username" required placeholder="client-name" /></label>
-      <label>Panel<select name="panelId" required onchange="window.Aegis.loadUserInbounds(this.value)">${(state.data?.panels || []).map((p) => `<option value="${p.id}"${p.id === state.createUserPanelId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
-      <div id="user-inbound-field">${createUserInboundField()}</div>
-      <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
-      <label>Data Limit<div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div></label>
-      <div id="user-expiry-field">${createUserExpiryField()}</div>
-      <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
-      <label class="switch-field">
-        <span>
-          <strong>Status</strong>
-          <small>Active account</small>
-        </span>
-        <span class="switch-control">
-          <input name="active" type="checkbox" checked />
-          <span class="switch-track" aria-hidden="true"></span>
-        </span>
-      </label>
-      <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
-      <button class="primary" type="submit">${createUserLabel()}</button>
+    <form class="form create-user-form create-user-advanced" onsubmit="window.Aegis.createUser(event)">
+      <div class="create-user-main">
+        <label>Username<input name="username" required placeholder="client-name" /></label>
+        <label>Panel<select name="panelId" required onchange="window.Aegis.loadUserInbounds(this.value)">${(state.data?.panels || []).map((p) => `<option value="${p.id}"${p.id === state.createUserPanelId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+        <label>Flow<input name="flow" placeholder="xtls-rprx-vision, optional" /></label>
+        <label class="unit-field">
+          <span>Data Limit</span>
+          <div class="unit-input"><input name="limitGb" type="number" min="0" step="any" value="25" /><span>GB</span></div>
+        </label>
+        <div id="user-expiry-field">${createUserExpiryField()}</div>
+        <label>Note<textarea name="note" rows="3" placeholder="Optional note for operators, bots, or integrations"></textarea></label>
+        <label class="switch-field">
+          <span>
+            <strong>Status</strong>
+            <small>Active account</small>
+          </span>
+          <span class="switch-control">
+            <input name="active" type="checkbox" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+      <div class="create-user-side" id="user-inbound-field">${createUserInboundField()}</div>
+      <div class="create-user-footer">
+        <div id="user-create-error">${state.createUserError ? `<p class="alert danger">${esc(state.createUserError)}</p>` : ""}</div>
+        <button class="primary" type="submit">${createUserLabel()}</button>
+      </div>
     </form>
   `;
 }

@@ -1146,32 +1146,50 @@ small {
 }
 
 .create-user-form {
-  gap: 10px;
+  gap: 12px;
 }
 
-.create-user-form > label {
+.create-user-form.create-user-advanced {
+  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
+}
+
+.create-user-main,
+.create-user-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  align-content: start;
+}
+
+.create-user-main > label,
+.create-user-main > div,
+.create-user-side > div {
+  min-width: 0;
+}
+
+.create-user-main > label {
   gap: 5px;
   color: var(--muted);
   font-size: 0.82rem;
 }
 
-.create-user-form input,
-.create-user-form select,
-.create-user-form textarea {
+.create-user-main input,
+.create-user-main select,
+.create-user-main textarea {
   border-radius: 10px;
   padding: 9px 11px;
   background: var(--surface-2);
 }
 
-.create-user-form input:hover,
-.create-user-form select:hover,
-.create-user-form textarea:hover {
+.create-user-main input:hover,
+.create-user-main select:hover,
+.create-user-main textarea:hover {
   border-color: rgba(148, 163, 184, 0.26);
 }
 
-.create-user-form input:focus,
-.create-user-form select:focus,
-.create-user-form textarea:focus {
+.create-user-main input:focus,
+.create-user-main select:focus,
+.create-user-main textarea:focus {
   border-color: rgba(59, 130, 246, 0.52);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
   outline: none;
@@ -1202,9 +1220,13 @@ small {
 .create-user-form .inbound-checklist {
   gap: 6px;
   padding: 10px;
+  max-height: 320px;
+  overflow: auto;
 }
 
 .create-user-form .inbound-option {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
   border-radius: 10px;
   padding: 8px 10px;
   background: var(--surface-2);
@@ -1272,6 +1294,21 @@ small {
 
 .create-user-form .expiry-shell:not(.has-value) .expiry-display-value {
   display: none;
+}
+
+.create-user-footer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 2px;
+}
+
+.create-user-footer > button.primary {
+  justify-self: end;
+  min-width: 180px;
+  padding-inline: 18px;
 }
 
 .edit-panel-form {
@@ -1953,6 +1990,10 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .create-user-form.create-user-advanced {
+    grid-template-columns: 1fr;
+  }
+
   .edit-panel-form {
     grid-template-columns: 1fr;
   }
@@ -1973,11 +2014,21 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .create-user-footer {
+    grid-template-columns: 1fr;
+  }
+
   .edit-panel-footer {
     grid-template-columns: 1fr;
   }
 
   .edit-user-footer > button.primary {
+    justify-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .create-user-footer > button.primary {
     justify-self: stretch;
     width: 100%;
     min-width: 0;

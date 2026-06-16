@@ -547,6 +547,12 @@ function extractClient(payload) {
   return null;
 }
 
+function extractVerifiedClient(payload, username) {
+  const client = extractClient(payload);
+  if (firstString(client?.email) === username) return client;
+  return null;
+}
+
 function collectInboundRows(payload) {
   const candidates = [
     payload,
@@ -655,6 +661,22 @@ function buildCreatePayload(user) {
   };
 }
 
+function buildInboundClient(client) {
+  return {
+    id: client.uuid,
+    flow: client.flow,
+    email: client.email,
+    limitIp: client.limitIp,
+    totalGB: client.totalGB,
+    expiryTime: client.expiryTime,
+    enable: client.enable,
+    tgId: String(client.tgId || ""),
+    subId: client.subId,
+    reset: client.reset,
+    comment: client.comment
+  };
+}
+
 function buildUpdatePayload(user, current = {}) {
   const merged = {
     ...current,
@@ -698,6 +720,57 @@ function buildSubscriptionUrlFromPayload(panel, payload, user) {
   return buildSubscriptionFallback(panel, identifier);
 }
 
+async function getUserWithClient(panel, user, client, auth) {
+  const username = firstString(typeof user === "string" ? user : user?.username, user?.email);
+  if (!username) fail(400, "3x-ui email is required");
+  let clientPayload;
+  try {
+    clientPayload = await requestPanel(client, auth, `/inbounds/getClientTraffics/${encodeURIComponent(username)}`, {
+      errorLabel: "get client"
+    });
+  } catch {
+    clientPayload = await requestPanel(client, auth, `/clients/get/${encodeURIComponent(username)}`, {
+      errorLabel: "get client"
+    });
+  }
+  let trafficPayload = null;
+  try {
+    trafficPayload = await requestPanel(client, auth, `/clients/traffic/${encodeURIComponent(username)}`, {
+      errorLabel: "get client traffic"
+    });
+  } catch {
+    trafficPayload = null;
+  }
+  const clientInfo = extractClient(clientPayload) || {};
+  if (firstString(clientInfo.email) !== username) {
+    fail(404, "3x-ui client not found");
+  }
+  const subscriptionId = extractSubscriptionIdentifier(clientInfo, { ...user, username });
+  const subscriptionUrl = buildSubscriptionUrl(panel, clientPayload, { ...user, subscriptionId, username });
+  const usedBytes =
+    extractTrafficBytes(trafficPayload) ??
+    extractTrafficBytes(clientPayload) ??
+    (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0);
+  return {
+    id: clientInfo.id ?? user?.id ?? username,
+    username: firstString(clientInfo.email, username),
+    active: clientInfo.enable !== false,
+    status: clientInfo.enable === false ? "disabled" : "active",
+    limitBytes: (() => {
+      const value = parseFiniteNumber(clientInfo.totalGB);
+      return value !== null && value >= 0 ? value : typeof user?.limitBytes === "number" && Number.isFinite(user.limitBytes) ? user.limitBytes : 0;
+    })(),
+    expiresAt: (() => {
+      const value = parseFiniteNumber(clientInfo.expiryTime);
+      return value !== null && value > 0 ? new Date(value).toISOString() : null;
+    })(),
+    usedBytes,
+    subscriptionId,
+    subscriptionUrl,
+    inboundIds: normalizeInboundIds(readPath(clientPayload, ["obj", "inboundIds"]) ?? clientPayload?.inboundIds ?? clientInfo?.inboundIds)
+  };
+}
+
 function toRequestBody(body) {
   if (body === undefined || body === null) return undefined;
   if (body instanceof URLSearchParams) return body.toString();
@@ -730,6 +803,10 @@ async function requestPanel(client, auth, path, { method = "GET", body, headers:
   const payload = await readJsonPayload(response);
   if (!response.ok && response.status !== 204) {
     responseError(response, `3x-ui ${errorLabel} failed`);
+  }
+  if (payload && typeof payload === "object" && payload.success === false) {
+    const message = firstString(payload.msg, payload.message, payload.detail, `3x-ui ${errorLabel} failed`);
+    fail(response.status >= 400 ? response.status : 502, message);
   }
   return payload;
 }
@@ -789,12 +866,22 @@ export async function createUser(panel, user) {
   const client = buildClient(panel);
   const auth = await authenticate(client);
   const body = buildCreatePayload(user);
-  const payload = await requestPanel(client, auth, "/clients/add", {
-    method: "POST",
-    body,
-    errorLabel: "create client"
-  });
-  const clientPayload = extractClient(payload) || {};
+  const inboundClient = buildInboundClient(body.client);
+  for (const inboundId of body.inboundIds) {
+    await requestPanel(client, auth, "/inbounds/addClient", {
+      method: "POST",
+      body: {
+        id: Number(inboundId),
+        settings: JSON.stringify({ clients: [inboundClient] })
+      },
+      errorLabel: "create client"
+    });
+  }
+  const verified = await getUserWithClient(panel, { ...user, username: body.client.email }, client, auth);
+  const clientPayload = extractVerifiedClient(verified, body.client.email) || verified || {};
+  if (firstString(clientPayload.email, clientPayload.username) !== body.client.email) {
+    fail(502, "3x-ui create client could not be verified");
+  }
   const subscriptionId = extractSubscriptionIdentifier(clientPayload, { ...user, subscriptionId: body.client?.subId });
   return {
     id: clientPayload.id ?? clientPayload.email ?? user?.id ?? body.client?.email,
@@ -908,44 +995,7 @@ export async function deleteUser(panel, user) {
 export async function getUser(panel, user) {
   const client = buildClient(panel);
   const auth = await authenticate(client);
-  const username = firstString(user?.username, user?.email);
-  if (!username) fail(400, "3x-ui email is required");
-  const clientPayload = await requestPanel(client, auth, `/clients/get/${encodeURIComponent(username)}`, {
-    errorLabel: "get client"
-  });
-  let trafficPayload = null;
-  try {
-    trafficPayload = await requestPanel(client, auth, `/clients/traffic/${encodeURIComponent(username)}`, {
-      errorLabel: "get client traffic"
-    });
-  } catch {
-    trafficPayload = null;
-  }
-  const clientInfo = extractClient(clientPayload) || {};
-  const subscriptionId = extractSubscriptionIdentifier(clientInfo, { ...user, username });
-  const subscriptionUrl = buildSubscriptionUrl(panel, clientPayload, { ...user, subscriptionId, username });
-  const usedBytes =
-    extractTrafficBytes(trafficPayload) ??
-    extractTrafficBytes(clientPayload) ??
-    (typeof user?.usedBytes === "number" && Number.isFinite(user.usedBytes) ? user.usedBytes : 0);
-  return {
-    id: clientInfo.id ?? user?.id ?? username,
-    username: firstString(clientInfo.email, username),
-    active: clientInfo.enable !== false,
-    status: clientInfo.enable === false ? "disabled" : "active",
-    limitBytes: (() => {
-      const value = parseFiniteNumber(clientInfo.totalGB);
-      return value !== null && value >= 0 ? value : typeof user?.limitBytes === "number" && Number.isFinite(user.limitBytes) ? user.limitBytes : 0;
-    })(),
-    expiresAt: (() => {
-      const value = parseFiniteNumber(clientInfo.expiryTime);
-      return value !== null && value > 0 ? new Date(value).toISOString() : null;
-    })(),
-    usedBytes,
-    subscriptionId,
-    subscriptionUrl,
-    inboundIds: normalizeInboundIds(readPath(clientPayload, ["obj", "inboundIds"]) ?? clientPayload?.inboundIds ?? clientInfo?.inboundIds)
-  };
+  return getUserWithClient(panel, user, client, auth);
 }
 
 export async function syncUserTraffic(panel, user) {
